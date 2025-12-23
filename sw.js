@@ -1,11 +1,12 @@
 /* BTX Docs Saúde — Service Worker (offline-first) */
-const CACHE_NAME = "btx-docs-cache-v6"; // mude o número quando atualizar arquivos
+const CACHE_NAME = "btx-docs-cache-v10";
 
 const ASSETS = [
   "./",
   "./index.html",
   "./style.css",
   "./app.js",
+  "./db.js",
   "./pwa.js",
   "./manifest.webmanifest",
   "./icons/icon-192.png",
