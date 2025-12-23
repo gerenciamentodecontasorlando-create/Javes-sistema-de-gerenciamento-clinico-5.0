@@ -3,19 +3,25 @@
   const btnInstall = document.getElementById("btnInstall");
   let deferredPrompt = null;
 
-  const setStatus = (txt)=>{ if(statusEl) statusEl.textContent = txt; };
+  function setStatus(txt){
+    if(statusEl) statusEl.textContent = txt;
+  }
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", async () => {
       try{
-        await navigator.serviceWorker.register("./sw.js");
+        const reg = await navigator.serviceWorker.register("./sw.js");
         setStatus("PWA: offline ativo ✅");
-      }catch{
+
+        reg.addEventListener("updatefound", () => {
+          setStatus("PWA: atualizando…");
+        });
+      }catch(e){
         setStatus("PWA: offline não registrado ❌");
       }
     });
   } else {
-    setStatus("PWA: sem suporte a SW");
+    setStatus("PWA: navegador não suporta SW");
   }
 
   window.addEventListener("beforeinstallprompt", (e) => {
@@ -24,8 +30,13 @@
     if(btnInstall){
       btnInstall.style.display = "inline-flex";
       btnInstall.onclick = async () => {
-        try{ deferredPrompt.prompt(); await deferredPrompt.userChoice; }
-        finally{ deferredPrompt=null; btnInstall.style.display="none"; }
+        try{
+          deferredPrompt.prompt();
+          await deferredPrompt.userChoice;
+        } finally {
+          deferredPrompt = null;
+          btnInstall.style.display = "none";
+        }
       };
     }
   });
