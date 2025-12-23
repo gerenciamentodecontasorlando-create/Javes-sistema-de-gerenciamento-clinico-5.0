@@ -3,27 +3,34 @@
   const btnInstall = document.getElementById("btnInstall");
   let deferredPrompt = null;
 
-  function setStatus(txt){
-    if(statusEl) statusEl.textContent = txt;
+  function setStatus(txt, ok=true){
+    if(!statusEl) return;
+    statusEl.textContent = txt;
+    statusEl.classList.toggle("ok", !!ok);
+    statusEl.classList.toggle("bad", !ok);
   }
 
+  // Service Worker
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", async () => {
       try{
-        const reg = await navigator.serviceWorker.register("./sw.js");
-        setStatus("PWA: offline ativo ✅");
+        const reg = await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+        setStatus("PWA: offline ativo ✅", true);
 
         reg.addEventListener("updatefound", () => {
-          setStatus("PWA: atualizando…");
+          setStatus("PWA: atualizando…", true);
         });
+
       }catch(e){
-        setStatus("PWA: offline não registrado ❌");
+        console.error(e);
+        setStatus("PWA: offline não registrado ❌", false);
       }
     });
   } else {
-    setStatus("PWA: navegador não suporta SW");
+    setStatus("PWA: navegador não suporta SW", false);
   }
 
+  // Install prompt
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     deferredPrompt = e;
@@ -43,6 +50,6 @@
 
   window.addEventListener("appinstalled", () => {
     if(btnInstall) btnInstall.style.display = "none";
-    setStatus("PWA: instalado ✅");
+    setStatus("PWA: instalado ✅", true);
   });
 })();
