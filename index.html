@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>BTX Docs Saúde — Agenda + Prontuário + Documentos</title>
 
-  <!-- PWA -->
   <link rel="manifest" href="./manifest.webmanifest">
   <meta name="theme-color" content="#19e28c">
   <link rel="icon" href="./icons/icon-192.png">
@@ -15,32 +14,15 @@
 </head>
 
 <body>
-  <!-- LOGIN OVERLAY -->
-  <div id="loginOverlay" class="login-overlay" aria-hidden="true">
-    <div class="login-card">
-      <div class="login-brand">
-        <div class="login-logo">B</div>
-        <div>
-          <div class="login-title">BTX Docs Saúde</div>
-          <div class="login-sub">Acesso por chave (offline)</div>
-        </div>
-      </div>
-
-      <label for="loginKey">Chave de acesso</label>
-      <input id="loginKey" autocomplete="off" autocapitalize="none" placeholder="Digite: btx007" />
-      <div class="login-row">
-        <label class="check">
-          <input type="checkbox" id="loginRemember" checked>
-          <span>Lembrar neste dispositivo</span>
-        </label>
-      </div>
-
-      <div class="login-actions">
-        <button class="btn btn-ghost" id="btnLoginHelp" type="button">Ajuda</button>
-        <button class="btn btn-primary" id="btnLogin" type="button">Entrar</button>
-      </div>
-
-      <div class="login-hint" id="loginHint"></div>
+  <!-- LOGIN -->
+  <div class="lock" id="lock">
+    <div class="lock-card">
+      <div class="lock-logo">B</div>
+      <h2>BTX Docs Saúde</h2>
+      <p>Digite a chave para acessar.</p>
+      <input id="lockKey" placeholder="ex: btx007" autocomplete="off" autocapitalize="none" />
+      <button class="btn btn-primary" id="btnUnlock" type="button">Entrar</button>
+      <div class="lock-hint">Dica: minúsculo, sem traços.</div>
     </div>
   </div>
 
@@ -54,9 +36,9 @@
     </div>
 
     <div class="top-actions">
-      <span class="pill" id="netPill">—</span>
-      <span class="pill" id="pwaPill">PWA: —</span>
-      <button class="btn btn-ghost" id="btnUpdate" type="button">Atualizar</button>
+      <div class="pill" id="netPill">—</div>
+      <div class="pill" id="pwaPill">PWA: verificando…</div>
+      <button class="btn btn-ghost" id="btnForceUpdate" type="button">Atualizar</button>
     </div>
   </header>
 
@@ -68,10 +50,7 @@
           <!-- LATERAL -->
           <aside class="card no-print">
             <h2>Profissional</h2>
-            <p class="small">
-              Esses dados entram automaticamente em todos os documentos e no cabeçalho.  
-              <b>Salvos no aparelho (IndexedDB)</b>.
-            </p>
+            <p class="small">Esses dados entram automaticamente em todos os documentos. Salva no aparelho (IndexedDB).</p>
 
             <label for="profNome">Nome completo</label>
             <input id="profNome" placeholder="Ex.: Dr(a). Orlando..." />
@@ -82,7 +61,7 @@
             <div class="row">
               <div>
                 <label for="profConselho">Conselho</label>
-                <input id="profConselho" placeholder="CRO / CRM / CREFITO..." />
+                <input id="profConselho" placeholder="CRO / CRM..." />
               </div>
               <div>
                 <label for="profReg">Registro</label>
@@ -90,7 +69,7 @@
               </div>
             </div>
 
-            <label for="profEnd">Endereço (recomendado)</label>
+            <label for="profEnd">Endereço (aparece no topo do PDF)</label>
             <input id="profEnd" placeholder="Rua, nº, bairro, cidade - UF" />
 
             <div class="row">
@@ -105,8 +84,8 @@
             </div>
 
             <div class="actions" style="justify-content:flex-start; margin-top:12px;">
-              <button class="btn btn-ghost" type="button" id="btnProfClear">Limpar</button>
-              <button class="btn btn-primary" type="button" id="btnProfSave">Salvar</button>
+              <button class="btn btn-ghost" type="button" id="btnLimparProf">Limpar</button>
+              <button class="btn btn-primary" type="button" id="btnSalvarProf">Salvar</button>
             </div>
 
             <hr class="hr" />
@@ -115,30 +94,24 @@
             <div class="tabs">
               <button class="tabbtn active" data-tab="agenda">Agenda <span class="badge">dia/semana</span></button>
               <button class="tabbtn" data-tab="prontuario">Prontuário <span class="badge">paciente</span></button>
-              <button class="tabbtn" data-tab="ficha">Ficha clínica <span class="badge">doc</span></button>
+              <button class="tabbtn" data-tab="ficha">Ficha clínica <span class="badge">cadastro</span></button>
               <button class="tabbtn" data-tab="receita">Receituário <span class="badge">1-clique</span></button>
-              <button class="tabbtn" data-tab="recibo">Recibo <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="orcamento">Orçamento <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="laudo">Laudo <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="atestado">Atestado <span class="badge">doc</span></button>
+              <button class="tabbtn" data-tab="recibo">Recibo <span class="badge">pagamento</span></button>
+              <button class="tabbtn" data-tab="orcamento">Orçamento <span class="badge">itens</span></button>
+              <button class="tabbtn" data-tab="laudo">Laudo <span class="badge">relatório</span></button>
+              <button class="tabbtn" data-tab="atestado">Atestado <span class="badge">afastamento</span></button>
             </div>
 
             <hr class="hr" />
 
-            <div class="small" id="storageStatus">Memória: —</div>
-
-            <div class="row" style="margin-top:10px;">
+            <div class="row">
               <button class="btn btn-ghost" id="btnInstall" type="button" style="display:none;">Instalar App</button>
-              <button class="btn btn-ghost" id="btnExport" type="button">Backup</button>
-              <button class="btn btn-ghost" id="btnImport" type="button">Importar</button>
-            </div>
-
-            <div class="row" style="margin-top:10px;">
               <button class="btn btn-danger" id="btnResetAll" type="button">Zerar tudo</button>
-              <button class="btn btn-danger" id="btnLogout" type="button">Sair</button>
             </div>
 
-            <input id="importFile" type="file" accept="application/json" style="display:none;" />
+            <p class="small" style="margin-top:12px;">
+              PDF imprime apenas a aba atual. “Baixar (HTML)” exporta o documento atual.
+            </p>
           </aside>
 
           <!-- CONTEÚDO -->
@@ -146,9 +119,11 @@
             <div class="content-header">
               <div>
                 <h3 id="docTitle">Agenda</h3>
-                <div class="sub" id="docSub">Dia e Semana, offline, com memória forte.</div>
+                <div class="sub" id="docSub">Agenda do dia e da semana, offline, com memória forte.</div>
               </div>
-              <div class="small">Profissional: <span id="profResumo">—</span></div>
+              <div class="small">
+                Profissional: <span id="profResumo">—</span>
+              </div>
             </div>
 
             <div class="split">
@@ -158,38 +133,32 @@
               <!-- PREVIEW -->
               <div class="panel">
                 <div class="actions no-print">
-                  <button class="btn btn-ghost" type="button" id="btnClearForm">Limpar</button>
-                  <button class="btn btn-ghost" type="button" id="btnDownloadHTML">Baixar (HTML)</button>
+                  <button class="btn btn-ghost" type="button" id="btnLimparForm">Limpar</button>
+                  <button class="btn btn-ghost" type="button" id="btnDownload">Baixar (HTML)</button>
                   <button class="btn btn-primary" type="button" id="btnPrint">Imprimir / PDF</button>
                 </div>
 
                 <div class="paper" id="paper">
                   <div class="doc-header">
                     <div class="doc-brand">
-                      <div class="doc-mark">
-                        <div class="doc-mark-logo">B</div>
-                        <div>
-                          <div class="doc-mark-title">BTX Docs Saúde</div>
-                          <div class="doc-mark-sub">DOCUMENTOS CLÍNICOS</div>
-                        </div>
-                      </div>
+                      <h1 id="pvTitle">Pré-visualização</h1>
+                      <p id="pvSub">Preencha um formulário para gerar o documento.</p>
+                      <div class="doc-profblock" id="pvProfBlock"></div>
                     </div>
-                    <div class="doc-meta" id="pvMeta"></div>
-                  </div>
-
-                  <div class="doc-headline">
-                    <div class="doc-h1" id="pvTitle">Pré-visualização</div>
-                    <div class="doc-h2" id="pvSub">Preencha um formulário para gerar o documento.</div>
+                    <div class="doc-meta" id="pvMeta">
+                      <div id="pvBrandRight"></div>
+                    </div>
                   </div>
 
                   <div id="pvBody"></div>
 
                   <div class="sign" id="pvSign"></div>
+                  <div class="doc-footer" id="pvFooter"></div>
                 </div>
               </div>
             </div>
-          </section>
 
+          </section>
         </div>
       </section>
     </div>
@@ -197,6 +166,7 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="./db.js"></script>
   <script src="./app.js"></script>
   <script src="./pwa.js"></script>
 </body>
