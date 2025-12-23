@@ -1,136 +1,58 @@
-/* BTX Docs Saúde — IndexedDB (memória forte offline) */
-(() => {
-  const DB_NAME = "btx_docs_saude_db";
-  const DB_VERSION = 1;
+// db.js — IndexedDB BTX Docs Saúde
 
-  const STORES = {
-    settings:   "settings",
-    patients:   "patients",
-    appts:      "appointments",
-    visits:     "visits",
-    documents:  "documents"
-  };
+const DB_NAME = "btx_docs_saude";
+const DB_VERSION = 1;
 
-  function openDB(){
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+let db = null;
 
-      req.onupgradeneeded = (ev) => {
-        const db = req.result;
+export function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
 
-        if(!db.objectStoreNames.contains(STORES.settings)){
-          db.createObjectStore(STORES.settings);
-        }
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
 
-        if(!db.objectStoreNames.contains(STORES.patients)){
-          const st = db.createObjectStore(STORES.patients, { keyPath: "id" });
-          st.createIndex("by_name", "name", { unique:false });
-        }
+      if (!db.objectStoreNames.contains("pacientes")) {
+        db.createObjectStore("pacientes", { keyPath: "id" });
+      }
 
-        if(!db.objectStoreNames.contains(STORES.appts)){
-          const st = db.createObjectStore(STORES.appts, { keyPath: "id" });
-          st.createIndex("by_date", "date", { unique:false });
-          st.createIndex("by_patient", "patientId", { unique:false });
-        }
+      if (!db.objectStoreNames.contains("agenda")) {
+        db.createObjectStore("agenda", { keyPath: "id" });
+      }
 
-        if(!db.objectStoreNames.contains(STORES.visits)){
-          const st = db.createObjectStore(STORES.visits, { keyPath: "id" });
-          st.createIndex("by_patient", "patientId", { unique:false });
-          st.createIndex("by_date", "date", { unique:false });
-        }
+      if (!db.objectStoreNames.contains("prontuario")) {
+        db.createObjectStore("prontuario", { keyPath: "id" });
+      }
+    };
 
-        if(!db.objectStoreNames.contains(STORES.documents)){
-          const st = db.createObjectStore(STORES.documents, { keyPath: "id" });
-          st.createIndex("by_patient", "patientId", { unique:false });
-          st.createIndex("by_type", "type", { unique:false });
-          st.createIndex("by_date", "date", { unique:false });
-        }
-      };
+    req.onsuccess = () => {
+      db = req.result;
+      resolve(db);
+    };
 
-      req.onerror = () => reject(req.error);
-      req.onsuccess = () => resolve(req.result);
-    });
-  }
+    req.onerror = () => reject("Erro ao abrir IndexedDB");
+  });
+}
 
-  async function tx(storeName, mode, fn){
-    const db = await openDB();
-    return new Promise((resolve, reject) => {
-      const t = db.transaction(storeName, mode);
-      const store = t.objectStore(storeName);
+function tx(store, mode = "readonly") {
+  return db.transaction(store, mode).objectStore(store);
+}
 
-      let result;
-      Promise.resolve()
-        .then(() => fn(store))
-        .then((r) => { result = r; })
-        .catch(reject);
+export function save(store, data) {
+  return new Promise((resolve) => {
+    tx(store, "readwrite").put(data).onsuccess = resolve;
+  });
+}
 
-      t.oncomplete = () => resolve(result);
-      t.onerror = () => reject(t.error);
-      t.onabort = () => reject(t.error);
-    });
-  }
+export function getAll(store) {
+  return new Promise((resolve) => {
+    const req = tx(store).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+  });
+}
 
-  function getAll(store){
-    return new Promise((resolve, reject) => {
-      const req = store.getAll();
-      req.onsuccess = () => resolve(req.result || []);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function getByKey(store, key){
-    return new Promise((resolve, reject) => {
-      const req = store.get(key);
-      req.onsuccess = () => resolve(req.result ?? null);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function put(store, value){
-    return new Promise((resolve, reject) => {
-      const req = store.put(value);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function del(store, key){
-    return new Promise((resolve, reject) => {
-      const req = store.delete(key);
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  function clear(store){
-    return new Promise((resolve, reject) => {
-      const req = store.clear();
-      req.onsuccess = () => resolve(true);
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  window.BTXDB = {
-    STORES,
-    async get(storeName, key){
-      return tx(storeName, "readonly", (store) => getByKey(store, key));
-    },
-    async set(storeName, value){
-      return tx(storeName, "readwrite", (store) => put(store, value));
-    },
-    async remove(storeName, key){
-      return tx(storeName, "readwrite", (store) => del(store, key));
-    },
-    async all(storeName){
-      return tx(storeName, "readonly", (store) => getAll(store));
-    },
-    async wipeAll(){
-      await tx(STORES.settings, "readwrite", (s)=>clear(s));
-      await tx(STORES.patients, "readwrite", (s)=>clear(s));
-      await tx(STORES.appts, "readwrite", (s)=>clear(s));
-      await tx(STORES.visits, "readwrite", (s)=>clear(s));
-      await tx(STORES.documents, "readwrite", (s)=>clear(s));
-      return true;
-    }
-  };
-})();
+export function remove(store, id) {
+  return new Promise((resolve) => {
+    tx(store, "readwrite").delete(id).onsuccess = resolve;
+  });
+}
