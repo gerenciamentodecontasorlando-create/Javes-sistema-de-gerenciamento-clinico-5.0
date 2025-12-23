@@ -1,4 +1,5 @@
-const CACHE_NAME = "btx-docs-cache-v50";
+/* BTX Docs Saúde — Service Worker (offline-first) */
+const CACHE_NAME = "btx-docs-cache-v51";
 
 const ASSETS = [
   "./",
@@ -13,7 +14,9 @@ const ASSETS = [
 ];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)));
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+  );
   self.skipWaiting();
 });
 
@@ -29,6 +32,7 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
+
   if (url.origin !== self.location.origin) return;
 
   event.respondWith(
