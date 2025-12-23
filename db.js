@@ -1,58 +1,70 @@
-// db.js — IndexedDB BTX Docs Saúde
+export const DB_NAME = "btx_docs_saude";
+export const DB_VERSION = 1;
 
-const DB_NAME = "btx_docs_saude";
-const DB_VERSION = 1;
+const STORES = ["kv", "agenda", "docs"];
 
-let db = null;
+let _db = null;
 
-export function openDB() {
-  return new Promise((resolve, reject) => {
+export function openDB(){
+  if(_db) return Promise.resolve(_db);
+
+  return new Promise((resolve, reject)=>{
     const req = indexedDB.open(DB_NAME, DB_VERSION);
 
-    req.onupgradeneeded = (e) => {
+    req.onupgradeneeded = (e)=>{
       const db = e.target.result;
-
-      if (!db.objectStoreNames.contains("pacientes")) {
-        db.createObjectStore("pacientes", { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains("agenda")) {
-        db.createObjectStore("agenda", { keyPath: "id" });
-      }
-
-      if (!db.objectStoreNames.contains("prontuario")) {
-        db.createObjectStore("prontuario", { keyPath: "id" });
+      for (const s of STORES){
+        if(!db.objectStoreNames.contains(s)){
+          db.createObjectStore(s, { keyPath: "id" });
+        }
       }
     };
 
-    req.onsuccess = () => {
-      db = req.result;
-      resolve(db);
-    };
-
-    req.onerror = () => reject("Erro ao abrir IndexedDB");
+    req.onsuccess = ()=>{ _db = req.result; resolve(_db); };
+    req.onerror = ()=>reject(req.error || new Error("Falha no IndexedDB"));
   });
 }
 
-function tx(store, mode = "readonly") {
+function storeTx(db, store, mode="readonly"){
   return db.transaction(store, mode).objectStore(store);
 }
 
-export function save(store, data) {
-  return new Promise((resolve) => {
-    tx(store, "readwrite").put(data).onsuccess = resolve;
+export async function put(store, obj){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const req = storeTx(db, store, "readwrite").put(obj);
+    req.onsuccess = ()=>resolve(true);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+export async function del(store, id){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const req = storeTx(db, store, "readwrite").delete(id);
+    req.onsuccess = ()=>resolve(true);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+export async function get(store, id){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const req = storeTx(db, store).get(id);
+    req.onsuccess = ()=>resolve(req.result || null);
+    req.onerror = ()=>reject(req.error);
+  });
+}
+export async function all(store){
+  const db = await openDB();
+  return new Promise((resolve, reject)=>{
+    const req = storeTx(db, store).getAll();
+    req.onsuccess = ()=>resolve(req.result || []);
+    req.onerror = ()=>reject(req.error);
   });
 }
 
-export function getAll(store) {
-  return new Promise((resolve) => {
-    const req = tx(store).getAll();
-    req.onsuccess = () => resolve(req.result || []);
-  });
-}
-
-export function remove(store, id) {
-  return new Promise((resolve) => {
-    tx(store, "readwrite").delete(id).onsuccess = resolve;
-  });
+// KV
+export async function kvSet(key, value){ return put("kv", { id:key, value }); }
+export async function kvGet(key, fallback=null){
+  const r = await get("kv", key);
+  return r ? r.value : fallback;
 }
