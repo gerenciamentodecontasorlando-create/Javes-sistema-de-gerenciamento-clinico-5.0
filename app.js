@@ -1,160 +1,88 @@
-/* BTX Docs Saúde — App */
+/* BTX Docs Saúde — App principal (offline + memória forte + documentos) */
 (() => {
   const $ = (id) => document.getElementById(id);
 
-  function toast(msg){
+  const APP_VER = "1.0.0";
+  const DEFAULT_KEY = "btx007";
+  const LS_AUTH = "btx_auth_ok";
+
+  const toast = (msg) => {
     const t = $("toast");
     t.textContent = msg;
     t.classList.add("show");
     clearTimeout(window.__toastTimer);
-    window.__toastTimer = setTimeout(()=>t.classList.remove("show"), 2600);
-  }
+    window.__toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  };
 
-  function esc(str){
-    return String(str ?? "")
-      .replaceAll("&","&amp;")
-      .replaceAll("<","&lt;")
-      .replaceAll(">","&gt;")
-      .replaceAll('"',"&quot;")
-      .replaceAll("'","&#39;");
-  }
+  const esc = (str) => String(str ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#39;");
 
-  function pad(n){ return String(n).padStart(2,"0"); }
-
-  function todayISO(){
+  const isoToday = () => {
     const d = new Date();
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
-  }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,"0");
+    const dd = String(d.getDate()).padStart(2,"0");
+    return `${yyyy}-${mm}-${dd}`;
+  };
 
-  function nowBR(){
-    const d = new Date();
-    const dt = `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`;
-    const hh = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    return `${dt} • ${hh}`;
-  }
-
-  function fmtBRFromISO(iso){
+  const fmtBR = (iso) => {
     if(!iso) return "";
     const [y,m,d] = iso.split("-");
     if(!y||!m||!d) return iso;
     return `${d}/${m}/${y}`;
+  };
+
+  const nowBR = () => {
+    const d = new Date();
+    const date = d.toLocaleDateString("pt-BR");
+    const time = d.toLocaleTimeString("pt-BR").slice(0,5);
+    return `${date} • ${time}`;
+  };
+
+  const formVal = (id) => {
+    const el = $(id);
+    return el ? (el.value ?? "").trim() : "";
+  };
+
+  function setDocMeta(prof){
+    $("pvMeta").textContent = nowBR();
+
+    // Cabeçalho: "DOCUMENTOS CLÍNICOS • endereço"
+    const endereco = (prof?.end || "").trim();
+    $("docBrandSub").textContent = endereco
+      ? `DOCUMENTOS CLÍNICOS • ${endereco}`
+      : `DOCUMENTOS CLÍNICOS • (adicione o endereço do profissional)`;
+
+    const resumo = prof?.nome ? `${prof.nome}${prof.esp ? " — " + prof.esp : ""}` : "—";
+    $("profResumo").textContent = resumo;
   }
 
-  function weekStartISO(iso){
-    // Monday as start
-    const d = iso ? new Date(iso+"T12:00:00") : new Date();
-    const day = d.getDay(); // 0=Sun
-    const diff = (day===0 ? -6 : 1) - day; // move to Monday
-    d.setDate(d.getDate()+diff);
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  async function getProf(){
+    const r = await BTX_DB.get(BTX_DB.STORES.profissional, "prof");
+    return r?.data || null;
   }
 
-  function addDaysISO(iso, n){
-    const d = new Date((iso||todayISO()) + "T12:00:00");
-    d.setDate(d.getDate()+n);
-    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  async function setProf(data){
+    await BTX_DB.put(BTX_DB.STORES.profissional, { key:"prof", data });
   }
 
-  function line(label, value){
-    if (!value) return "";
-    return `<p class="doc-line"><strong>${esc(label)}:</strong> ${esc(value)}</p>`;
-  }
-
-  function block(title, value){
-    if (!value) return "";
-    return `<div><div class="doc-title">${esc(title)}</div><div class="doc-block">${esc(value)}</div></div>`;
-  }
-
-  function downloadText(filename, content, type="text/plain;charset=utf-8"){
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url), 800);
-  }
-
-  /* =========================
-     LOGIN (chave simples)
-     ========================= */
-  const DEFAULT_KEY = "btx007";
-  async function getSavedKey(){
-    return await BTXDB.getSetting("login_key", DEFAULT_KEY);
-  }
-  async function setSavedKey(key){
-    await BTXDB.setSetting("login_key", key);
-  }
-  async function isUnlocked(){
-    return await BTXDB.getSetting("unlocked", false);
-  }
-  async function setUnlocked(v){
-    await BTXDB.setSetting("unlocked", !!v);
-  }
-
-  async function showLogin(force=false){
-    const overlay = $("loginOverlay");
-    if(!overlay) return;
-
-    if(!force){
-      const unlocked = await isUnlocked();
-      if(unlocked){
-        overlay.style.display = "none";
-        return;
-      }
-    }
-
-    overlay.style.display = "flex";
-    $("loginKey").value = "";
-
-    $("btnLogin").onclick = async ()=>{
-      const typed = ($("loginKey").value || "").trim().toLowerCase();
-      const saved = (await getSavedKey()).toLowerCase();
-      if(typed && typed === saved){
-        await setUnlocked(true);
-        overlay.style.display = "none";
-        toast("Acesso liberado ✅");
-      }else{
-        toast("Chave incorreta ❌");
-      }
-    };
-
-    $("btnResetLock").onclick = async ()=>{
-      // permite trocar chave se usuário souber a atual
-      const cur = prompt("Digite a chave atual para trocar:");
-      if(!cur) return;
-      const saved = (await getSavedKey()).toLowerCase();
-      if(cur.trim().toLowerCase() !== saved){
-        toast("Chave atual incorreta ❌");
-        return;
-      }
-      const nova = prompt("Nova chave (minúsculo, sem espaços):", saved);
-      if(!nova) return;
-      await setSavedKey(nova.trim().toLowerCase());
-      await setUnlocked(false);
-      toast("Chave trocada ✅ Faça login novamente.");
-      overlay.style.display = "flex";
-    };
-  }
-
-  /* =========================
-     PROFISSIONAL
-     ========================= */
-  function readProfFromUI(){
+  function profFromUI(){
     return {
-      nome: $("profNome").value.trim(),
-      esp: $("profEsp").value.trim(),
-      conselho: $("profConselho").value.trim(),
-      reg: $("profReg").value.trim(),
-      end: $("profEnd").value.trim(),
-      tel: $("profTel").value.trim(),
-      email: $("profEmail").value.trim(),
+      nome: formVal("profNome"),
+      esp: formVal("profEsp"),
+      conselho: formVal("profConselho"),
+      reg: formVal("profReg"),
+      end: formVal("profEnd"),
+      tel: formVal("profTel"),
+      email: formVal("profEmail"),
     };
   }
 
-  function setProfToUI(p){
+  function profToUI(p){
     $("profNome").value = p?.nome || "";
     $("profEsp").value = p?.esp || "";
     $("profConselho").value = p?.conselho || "";
@@ -164,195 +92,277 @@
     $("profEmail").value = p?.email || "";
   }
 
-  function profLines(p){
-    const cr = (p?.conselho || p?.reg) ? `${p.conselho || ""} ${p.reg || ""}`.trim() : "";
-    return [p?.nome, p?.esp, cr, p?.end, p?.tel, p?.email].filter(Boolean);
+  function footerHTML(prof){
+    const nome = prof?.nome || "";
+    const esp  = prof?.esp || "";
+    const cr   = [prof?.conselho, prof?.reg].filter(Boolean).join(" ").trim();
+    const end  = prof?.end || "";
+    const tel  = prof?.tel || "";
+    const email= prof?.email || "";
+
+    const left = `
+      <div class="footer-col">
+        <div><b>${esc(nome || "Profissional")}</b>${esp ? ` — ${esc(esp)}` : ""}</div>
+        ${cr ? `<div>${esc(cr)}</div>` : ""}
+        ${end ? `<div>${esc(end)}</div>` : ""}
+        ${(tel || email) ? `<div>${esc(tel)}${tel && email ? " • " : ""}${esc(email)}</div>` : ""}
+      </div>
+    `;
+
+    const right = `
+      <div class="footer-col" style="text-align:right;">
+        <div class="sigline"></div>
+        <div><b>Assinatura do(a) profissional</b></div>
+      </div>
+      <div class="footer-col" style="text-align:right;">
+        <div class="sigline"></div>
+        <div><b>Assinatura do(a) paciente / responsável</b></div>
+      </div>
+    `;
+
+    return `<div class="footer-row">${left}${right}</div>`;
   }
 
   /* =========================
-     RX PRESETS (completo)
-     - Conteúdo é para "atalho", mas o PDF só imprime o que estiver no campo.
+     LOGIN (chave simples)
      ========================= */
-  const RX_PRESETS = {
+  function lock(){
+    $("loginModal").style.display = "flex";
+  }
+  function unlock(){
+    $("loginModal").style.display = "none";
+  }
+  function setupLogin(){
+    const input = $("loginKey");
+    const btn = $("btnLogin");
+    const btnForgot = $("btnForgotKey");
+
+    const ok = localStorage.getItem(LS_AUTH) === "1";
+    if (ok) unlock(); else lock();
+
+    const tryLogin = () => {
+      const typed = (input.value || "").trim().toLowerCase();
+      if (typed === DEFAULT_KEY){
+        localStorage.setItem(LS_AUTH, "1");
+        unlock();
+        toast("Acesso liberado ✅");
+      } else {
+        alert("Chave incorreta. Use: btx007");
+        input.focus();
+        input.select();
+      }
+    };
+
+    btn.addEventListener("click", (e) => { e.preventDefault(); tryLogin(); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter"){ e.preventDefault(); tryLogin(); }
+    });
+
+    btnForgot.addEventListener("click", (e) => {
+      e.preventDefault();
+      localStorage.removeItem(LS_AUTH);
+      input.value = "";
+      lock();
+      toast("Chave resetada (padrão: btx007) ✅");
+    });
+
+    // preenche default
+    input.value = DEFAULT_KEY;
+  }
+
+  /* =========================
+     PACIENTES (cadastro leve)
+     ========================= */
+  async function listPacientes(){
+    const all = await BTX_DB.getAll(BTX_DB.STORES.pacientes);
+    all.sort((a,b)=> (a.nome||"").localeCompare(b.nome||""));
+    return all;
+  }
+
+  async function upsertPaciente({id, nome, tel, nasc, end, obs}){
+    const pid = id || BTX_DB.uid("pac");
+    const obj = { id: pid, nome:nome||"", tel:tel||"", nasc:nasc||"", end:end||"", obs:obs||"", updatedAt: Date.now() };
+    await BTX_DB.put(BTX_DB.STORES.pacientes, obj);
+    return pid;
+  }
+
+  /* =========================
+     AGENDA (dia/semana)
+     ========================= */
+  function startOfWeekISO(iso){
+    const [y,m,d] = iso.split("-").map(Number);
+    const dt = new Date(y, m-1, d, 12, 0, 0);
+    const day = dt.getDay(); // 0 dom ... 6 sab
+    const diff = (day === 0 ? -6 : 1 - day); // segunda como início
+    dt.setDate(dt.getDate() + diff);
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    const dd = String(dt.getDate()).padStart(2,"0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function addDaysISO(iso, add){
+    const [y,m,d] = iso.split("-").map(Number);
+    const dt = new Date(y, m-1, d, 12, 0, 0);
+    dt.setDate(dt.getDate() + add);
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth()+1).padStart(2,"0");
+    const dd = String(dt.getDate()).padStart(2,"0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  async function addAgendaItem(item){
+    const id = BTX_DB.uid("ag");
+    const obj = { id, ...item, createdAt: Date.now() };
+    await BTX_DB.put(BTX_DB.STORES.agenda, obj);
+    return id;
+  }
+
+  async function getAgendaByDate(iso){
+    const all = await BTX_DB.getAll(BTX_DB.STORES.agenda);
+    return all.filter(a => a.data === iso).sort((a,b)=> (a.hora||"").localeCompare(b.hora||""));
+  }
+
+  async function getAgendaWeek(iso){
+    const start = startOfWeekISO(iso);
+    const days = Array.from({length:7}, (_,i)=> addDaysISO(start, i));
+    const all = await BTX_DB.getAll(BTX_DB.STORES.agenda);
+    const filtered = all.filter(a => days.includes(a.data));
+    filtered.sort((a,b)=> (a.data+" "+(a.hora||"")).localeCompare(b.data+" "+(b.hora||"")));
+    return { start, days, items: filtered };
+  }
+
+  /* =========================
+     PRONTUÁRIO (registros)
+     ========================= */
+  async function addProntuarioRegistro({pacienteId, data, procedimento, anotacoes}){
+    const id = BTX_DB.uid("pr");
+    const obj = { id, pacienteId, data, procedimento: procedimento||"", anotacoes: anotacoes||"", createdAt: Date.now() };
+    await BTX_DB.put(BTX_DB.STORES.prontuario, obj);
+    return id;
+  }
+
+  async function getProntuarioByPaciente(pacienteId){
+    const all = await BTX_DB.getAll(BTX_DB.STORES.prontuario);
+    return all.filter(r => r.pacienteId === pacienteId)
+      .sort((a,b)=> (a.data||"").localeCompare(b.data||""));
+  }
+
+  /* =========================
+     RECEITUÁRIO (presets)
+     ========================= */
+  // Presets pensados para “1 clique” e você editar. Sem texto marketing no PDF.
+  const RX = {
     // Analgésicos
-    dipirona: "Dipirona 500mg\nTomar 01 comprimido a cada 6–8 horas, se dor ou febre, por até 3 dias.",
-    paracetamol: "Paracetamol 750mg\nTomar 01 comprimido a cada 8 horas, se dor ou febre, por até 3 dias.",
+    dipirona: { titulo:"Dipirona 500mg", qtd:"08 comprimidos", texto:"Tomar 01 comprimido a cada 6–8 horas, se dor ou febre, por até 3 dias." },
+    paracetamol:{ titulo:"Paracetamol 750mg", qtd:"09 comprimidos", texto:"Tomar 01 comprimido a cada 8 horas, se dor ou febre, por até 3 dias." },
 
     // Anti-inflamatórios
-    ibuprofeno: "Ibuprofeno 400mg\nTomar 01 comprimido a cada 8 horas, após alimentação, por 3 dias.",
-    nimesulida: "Nimesulida 100mg\nTomar 01 comprimido a cada 12 horas, após alimentação, por 3 dias.",
-    diclofenaco: "Diclofenaco de potássio 50mg\nTomar 01 comprimido a cada 8–12 horas, após alimentação, por 3 dias.",
+    ibuprofeno:{ titulo:"Ibuprofeno 400mg", qtd:"09 comprimidos", texto:"Tomar 01 comprimido a cada 8 horas, após alimentação, por 3 dias." },
+    nimesulida:{ titulo:"Nimesulida 100mg", qtd:"06 comprimidos", texto:"Tomar 01 comprimido a cada 12 horas, após alimentação, por 3 dias." },
+    diclofenaco:{ titulo:"Diclofenaco potássico 50mg", qtd:"09 comprimidos", texto:"Tomar 01 comprimido a cada 8–12 horas, após alimentação, por 3 dias." },
 
     // Antibióticos
-    amoxicilina: "Amoxicilina 500mg\nTomar 01 cápsula a cada 8 horas por 7 dias.",
-    azitromicina: "Azitromicina 500mg\nTomar 01 comprimido ao dia por 3 dias.",
-    amoxclav: "Amoxicilina 875mg + Clavulanato 125mg\nTomar 01 comprimido a cada 12 horas por 7 dias.",
+    amoxicilina:{ titulo:"Amoxicilina 500mg", qtd:"21 cápsulas", texto:"Tomar 01 cápsula a cada 8 horas por 7 dias." },
+    azitromicina:{ titulo:"Azitromicina 500mg", qtd:"03 comprimidos", texto:"Tomar 01 comprimido ao dia por 3 dias." },
+    amoxclav:{ titulo:"Amoxicilina 875mg + Clavulanato 125mg", qtd:"14 comprimidos", texto:"Tomar 01 comprimido a cada 12 horas por 7 dias." },
 
     // Hipertensão
-    losartana: "Losartana 50mg\nTomar 01 comprimido ao dia (conforme prescrição).",
-    enalapril: "Enalapril 10mg\nTomar 01 comprimido ao dia (conforme prescrição).",
-    amlodipino: "Amlodipino 5mg\nTomar 01 comprimido ao dia (conforme prescrição).",
-    hctz: "Hidroclorotiazida 25mg (HCTZ)\nTomar 01 comprimido ao dia (conforme prescrição).",
+    losartana:{ titulo:"Losartana 50mg", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
+    enalapril:{ titulo:"Enalapril 10mg", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
+    amlodipino:{ titulo:"Amlodipino 5mg", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
+    hctz:{ titulo:"Hidroclorotiazida 25mg (HCTZ)", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
 
     // Diabetes
-    metformina: "Metformina 500mg\nTomar 01 comprimido 2x ao dia, junto às refeições (conforme prescrição).",
-    glibenclamida: "Glibenclamida 5mg\nTomar 01 comprimido ao dia (conforme prescrição).",
-    gliclazida: "Gliclazida 30mg (liberação prolongada)\nTomar 01 comprimido ao dia (conforme prescrição).",
+    metformina:{ titulo:"Metformina 500mg", qtd:"60 comprimidos", texto:"Tomar 01 comprimido 2x ao dia, junto às refeições (conforme prescrição)." },
+    glibenclamida:{ titulo:"Glibenclamida 5mg", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
+    gliclazida:{ titulo:"Gliclazida 30mg (liberação modificada)", qtd:"30 comprimidos", texto:"Tomar 01 comprimido ao dia (conforme prescrição)." },
 
-    // Antifúngicos / dermatológicos
-    fluconazol: "Fluconazol 150mg\nTomar 01 cápsula dose única (ou conforme prescrição).",
-    cetoconazol_creme: "Cetoconazol creme 2%\nAplicar fina camada 2x ao dia por 14 dias (conforme orientação).",
-    miconazol_creme: "Miconazol creme 2%\nAplicar fina camada 2x ao dia por 14 dias (conforme orientação).",
-    terbinafina_creme: "Terbinafina creme 1%\nAplicar 1–2x ao dia por 7–14 dias (conforme orientação).",
-    shampoo_cetoconazol: "Shampoo cetoconazol 2%\nAplicar no couro cabeludo, deixar agir 3–5 min e enxaguar; usar 2–3x/semana por 2–4 semanas."
+    // Antifúngicos / Dermatológicos
+    fluconazol:{ titulo:"Fluconazol 150mg", qtd:"01 cápsula", texto:"Tomar 01 cápsula dose única (ou conforme prescrição)." },
+    cetoconazol_creme:{ titulo:"Cetoconazol creme 2%", qtd:"01 bisnaga", texto:"Aplicar fina camada 2x ao dia por 7–14 dias (conforme orientação)." },
+    miconazol_creme:{ titulo:"Miconazol creme 2%", qtd:"01 bisnaga", texto:"Aplicar fina camada 2x ao dia por 7–14 dias (conforme orientação)." },
+    terbinafina_creme:{ titulo:"Terbinafina creme 1%", qtd:"01 bisnaga", texto:"Aplicar fina camada 1–2x ao dia por 7–14 dias (conforme orientação)." },
+    shampoo_cetoconazol:{ titulo:"Shampoo cetoconazol 2%", qtd:"01 frasco", texto:"Aplicar, deixar agir 3–5 min e enxaguar; usar 2–3x/semana por 2–4 semanas." },
   };
 
-  function appendRxPreset(key){
-    const ta = $("r_corpo");
-    if(!ta) return;
-    const txt = RX_PRESETS[key];
-    if(!txt) return;
-    const cur = ta.value.trim();
-    ta.value = cur ? (cur + "\n\n" + txt) : txt;
-
-    // salva rascunho
-    saveDraftForTab("receita");
-    buildPreview();
+  function rxLine(key){
+    const it = RX[key];
+    if(!it) return "";
+    return `${it.titulo}    ${it.qtd}\n${it.texto}`;
   }
 
   /* =========================
-     DRAFTS (rascunho de documentos)
+     TABS & UI
      ========================= */
-  async function saveDraftForTab(tab){
-    const data = {};
-    $("formPanel").querySelectorAll("input,textarea,select").forEach(el=>{
-      if(!el.id) return;
-      data[el.id] = el.value;
+  let currentTab = "agenda";
+  let lastBuiltHTML = ""; // pra baixar html do preview
+
+  function setTabActive(tab){
+    document.querySelectorAll(".tabbtn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+    currentTab = tab;
+  }
+
+  function bindLivePreviewInputs(panel){
+    panel.querySelectorAll("input,textarea,select").forEach(el=>{
+      el.addEventListener("input", buildPreview);
+      el.addEventListener("change", buildPreview);
     });
-    await BTXDB.saveDraft("draft_"+tab, { tab, data });
   }
 
-  async function loadDraftForTab(tab){
-    const d = await BTXDB.getDraft("draft_"+tab);
-    return d?.data || null;
+  function docLine(label, value){
+    if(!value) return "";
+    return `<p class="doc-line"><strong>${esc(label)}:</strong> ${esc(value)}</p>`;
   }
 
-  async function applyDraftToForm(draft){
-    if(!draft) return;
-    for(const [k,v] of Object.entries(draft)){
-      const el = $(k);
-      if(el) el.value = v;
-    }
+  function docBlock(title, value){
+    if(!value) return "";
+    return `<div><div class="doc-title">${esc(title)}</div><div class="doc-block">${esc(value)}</div></div>`;
   }
 
-  /* =========================
-     AGENDA + PACIENTES + PRONTUÁRIO
-     ========================= */
-  async function ensurePacienteFromInput(nome, tel=""){
-    nome = (nome||"").trim();
-    tel = (tel||"").trim();
-    if(!nome) return null;
+  async function renderTab(tab){
+    setTabActive(tab);
 
-    // tenta achar por nome+tel
-    const all = await BTXDB.listPacientes();
-    const found = all.find(p =>
-      (p.nome||"").toLowerCase() === nome.toLowerCase() &&
-      ((tel && (p.tel||"")===tel) || (!tel))
-    );
-    if(found) return found;
+    const map = TABS[tab];
+    $("docTitle").textContent = map.title;
+    $("docSub").textContent = map.sub;
 
-    return await BTXDB.upsertPaciente({ nome, tel });
+    const panel = $("formPanel");
+    panel.innerHTML = await map.renderForm();
+    bindLivePreviewInputs(panel);
+    if (map.afterRender) await map.afterRender();
+    await buildPreview();
   }
 
-  function agendaRowHTML(it, pacienteNome){
-    return `
-      <tr>
-        <td>${esc(it.hora||"")}</td>
-        <td>${esc(pacienteNome||it.pacienteNome||"")}</td>
-        <td>${esc(it.tipo||"")}</td>
-        <td>${esc(it.status||"")}</td>
-        <td>${esc(it.obs||"")}</td>
-      </tr>
-    `;
-  }
+  async function buildPreview(){
+    const prof = await getProf();
+    setDocMeta(prof);
 
-  async function agendaTableHTML(list){
-    if(!list.length){
-      return `<p class="doc-line">Nenhum agendamento encontrado.</p>`;
-    }
-    // resolve nomes
-    const pacientes = await BTXDB.listPacientes();
-    const map = new Map(pacientes.map(p=>[p.id,p]));
+    $("pvTitle").textContent = TABS[currentTab].title;
+    $("pvSub").textContent = TABS[currentTab].sub;
 
-    const rows = list.map(it=>{
-      const p = it.pacienteId ? map.get(it.pacienteId) : null;
-      const nome = p?.nome || it.pacienteNome || "";
-      return agendaRowHTML(it, nome);
-    }).join("");
+    const body = await TABS[currentTab].build();
+    $("pvBody").innerHTML = body;
+    $("pvFooter").innerHTML = footerHTML(prof);
 
-    return `
-      <div class="doc-title">Agendamentos</div>
-      <table>
-        <thead><tr><th>Hora</th><th>Paciente</th><th>Tipo</th><th>Status</th><th>Obs</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
-  }
-
-  async function listAgendaByDay(iso){
-    const all = await BTXDB.listAgenda();
-    return all
-      .filter(it=>it.data === iso)
-      .sort((a,b)=> (a.hora||"").localeCompare(b.hora||""));
-  }
-
-  async function listAgendaWeek(weekStart){
-    const days = Array.from({length:7}, (_,i)=>addDaysISO(weekStart,i));
-    const all = await BTXDB.listAgenda();
-    return all
-      .filter(it=> days.includes(it.data))
-      .sort((a,b)=> (a.data+" "+(a.hora||"")).localeCompare(b.data+" "+(b.hora||"")));
-  }
-
-  async function atendimentosTableHTML(pacienteId){
-    const p = await BTXDB.getPaciente(pacienteId);
-    const list = await BTXDB.listAtendimentosByPaciente(pacienteId);
-    list.sort((a,b)=>(a.data||"").localeCompare(b.data||""));
-
-    if(!list.length){
-      return `<p class="doc-line">Nenhum atendimento registrado ainda.</p>`;
-    }
-
-    const rows = list.map(it=>`
-      <tr>
-        <td>${esc(fmtBRFromISO(it.data||""))}</td>
-        <td>${esc(it.tipo||"")}</td>
-        <td>${esc(it.descricao||"")}</td>
-        <td>${esc(it.conduta||"")}</td>
-      </tr>
-    `).join("");
-
-    return `
-      ${p?.nome ? `<div class="doc-title">Histórico — ${esc(p.nome)}</div>` : `<div class="doc-title">Histórico</div>`}
-      <table>
-        <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Conduta</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
-    `;
+    lastBuiltHTML = $("paper").outerHTML;
   }
 
   /* =========================
-     TABS
+     TABS IMPLEMENTAÇÃO
      ========================= */
   const TABS = {
+
     agenda: {
       title: "Agenda",
-      sub: "Dia e semana, offline com memória forte.",
+      sub: "Dia e Semana, offline, com memória forte.",
       renderForm: async () => {
-        const today = todayISO();
+        const pacientes = await listPacientes();
+        const opts = pacientes.map(p => `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel ? " • "+esc(p.tel) : ""}</option>`).join("");
+
         return `
           <label>Data</label>
-          <input id="ag_data" type="date" value="${today}" />
+          <input id="ag_data" type="date" value="${isoToday()}" />
 
           <div class="row">
             <div>
@@ -360,25 +370,25 @@
               <input id="ag_hora" type="time" />
             </div>
             <div>
-              <label>Paciente (nome)</label>
-              <input id="ag_paciente_nome" placeholder="Digite o nome do paciente" />
+              <label>Busca rápida (nome ou telefone)</label>
+              <input id="ag_busca" placeholder="Digite para filtrar…" />
             </div>
           </div>
 
+          <label>Selecionar paciente (opcional)</label>
+          <select id="ag_pacienteId">
+            <option value="">— digite acima ou cadastre —</option>
+            ${opts}
+          </select>
+
           <div class="row">
             <div>
-              <label>Telefone (opcional)</label>
-              <input id="ag_paciente_tel" placeholder="(00) 00000-0000" />
+              <label>Nome do paciente (se não selecionar)</label>
+              <input id="ag_pacienteNome" placeholder="Nome do paciente" />
             </div>
             <div>
-              <label>Status</label>
-              <select id="ag_status">
-                <option value="aguardando">aguardando</option>
-                <option value="confirmado">confirmado</option>
-                <option value="remarcado">remarcado</option>
-                <option value="faltou">faltou</option>
-                <option value="concluido">concluído</option>
-              </select>
+              <label>Telefone (opcional)</label>
+              <input id="ag_pacienteTel" placeholder="(00) 00000-0000" />
             </div>
           </div>
 
@@ -393,296 +403,304 @@
               </select>
             </div>
             <div>
-              <label>Observações</label>
-              <input id="ag_obs" placeholder="Ex: retorno pós-op, dor, etc." />
+              <label>Status</label>
+              <select id="ag_status">
+                <option value="aguardando">aguardando</option>
+                <option value="confirmado">confirmado</option>
+                <option value="remarcado">remarcado</option>
+                <option value="faltou">faltou</option>
+                <option value="concluido">concluído</option>
+              </select>
             </div>
           </div>
 
-          <div class="actions" style="justify-content:flex-start; margin-top:10px;">
-            <button class="btn btn-primary" type="button" id="btnAgSalvar">Salvar</button>
-            <button class="btn btn-ghost" type="button" id="btnAgHoje">Hoje</button>
-            <button class="btn btn-ghost" type="button" id="btnAgSemana">Semana</button>
+          <label>Observações</label>
+          <input id="ag_obs" placeholder="Ex.: retorno pós-op, dor, etc." />
+
+          <div class="actions" style="justify-content:flex-start;">
+            <button class="btn btn-primary" id="btnAgSalvar" type="button">Salvar</button>
+            <button class="btn btn-ghost" id="btnAgHoje" type="button">Hoje</button>
+            <button class="btn btn-ghost" id="btnAgSemana" type="button">Semana</button>
           </div>
 
-          <p class="small" style="margin-top:10px;">
-            Dica: “Semana” monta a visão semanal no PDF. “Salvar” grava o nome do paciente corretamente.
-          </p>
+          <hr class="hr" />
+
+          <h2 style="margin-top:0;">Cadastro rápido do paciente</h2>
+          <div class="row">
+            <div>
+              <label>Nome</label>
+              <input id="pac_nome" />
+            </div>
+            <div>
+              <label>Telefone</label>
+              <input id="pac_tel" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label>Nascimento</label>
+              <input id="pac_nasc" type="date" />
+            </div>
+            <div>
+              <label>Endereço</label>
+              <input id="pac_end" />
+            </div>
+          </div>
+          <label>Observações</label>
+          <textarea id="pac_obs"></textarea>
+
+          <div class="actions" style="justify-content:flex-start;">
+            <button class="btn btn-ghost" id="btnPacCadastrar" type="button">Cadastrar / Atualizar</button>
+          </div>
+
+          <p class="small">Dica: use “Semana” para imprimir a agenda semanal em PDF.</p>
         `;
       },
-      build: async () => {
-        const day = ($("ag_data")?.value || todayISO());
-        const mode = window.__agendaMode || "day";
-        if(mode === "week"){
-          const ws = weekStartISO(day);
-          const list = await listAgendaWeek(ws);
-          return `
-            <div class="doc-title">Semana (início): ${esc(fmtBRFromISO(ws))}</div>
-            ${await agendaTableHTML(list)}
-          `;
-        } else {
-          const list = await listAgendaByDay(day);
-          return `
-            <div class="doc-title">Agenda do dia — ${esc(fmtBRFromISO(day))}</div>
-            ${await agendaTableHTML(list)}
-          `;
-        }
-      },
       afterRender: async () => {
-        window.__agendaMode = "day";
+        const pacientes = await listPacientes();
 
-        $("btnAgSalvar").addEventListener("click", async ()=>{
-          const data = $("ag_data").value || todayISO();
-          const hora = ($("ag_hora").value || "").trim();
-          const nome = ($("ag_paciente_nome").value || "").trim();
-          const tel = ($("ag_paciente_tel").value || "").trim();
-          if(!nome){
-            toast("Digite o nome do paciente ❌");
+        const select = $("ag_pacienteId");
+        const busca = $("ag_busca");
+
+        const filterSelect = () => {
+          const q = (busca.value||"").trim().toLowerCase();
+          const options = pacientes.filter(p => {
+            const a = (p.nome||"").toLowerCase();
+            const b = (p.tel||"").toLowerCase();
+            return !q || a.includes(q) || b.includes(q);
+          }).map(p => `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel ? " • "+esc(p.tel) : ""}</option>`).join("");
+
+          select.innerHTML = `<option value="">— digite acima ou cadastre —</option>${options}`;
+        };
+
+        busca.addEventListener("input", filterSelect);
+
+        $("btnPacCadastrar").addEventListener("click", async () => {
+          const nome = formVal("pac_nome");
+          if(!nome) return alert("Digite o nome do paciente.");
+          const tel = formVal("pac_tel");
+          const nasc = formVal("pac_nasc");
+          const end = formVal("pac_end");
+          const obs = formVal("pac_obs");
+
+          const id = await upsertPaciente({ nome, tel, nasc, end, obs });
+          toast("Paciente salvo ✅");
+
+          // repõe campos e seleciona
+          $("ag_busca").value = nome;
+          $("ag_pacienteNome").value = "";
+          $("ag_pacienteTel").value = "";
+          await renderTab("agenda");
+          // tentar selecionar recém criado
+          const sel = $("ag_pacienteId");
+          sel.value = id;
+          await buildPreview();
+        });
+
+        $("btnAgSalvar").addEventListener("click", async () => {
+          const data = formVal("ag_data") || isoToday();
+          const hora = formVal("ag_hora");
+          const tipo = formVal("ag_tipo") || "consulta";
+          const status = formVal("ag_status") || "aguardando";
+          const obs = formVal("ag_obs");
+
+          let pacienteId = formVal("ag_pacienteId");
+          let pacienteNome = formVal("ag_pacienteNome");
+          let pacienteTel = formVal("ag_pacienteTel");
+
+          // Se escolheu paciente do select, puxar nome/tel do cadastro
+          if(pacienteId){
+            const p = await BTX_DB.get(BTX_DB.STORES.pacientes, pacienteId);
+            pacienteNome = p?.nome || pacienteNome;
+            pacienteTel = p?.tel || pacienteTel;
+          } else {
+            // Se não escolheu e digitou nome, salva/atualiza paciente rápido (opcional, mas ajuda)
+            if(pacienteNome){
+              pacienteId = await upsertPaciente({ nome: pacienteNome, tel: pacienteTel });
+            }
+          }
+
+          if(!pacienteNome){
+            alert("Digite o nome do paciente (ou selecione).");
             return;
           }
 
-          const p = await ensurePacienteFromInput(nome, tel);
-
-          await BTXDB.addAgenda({
-            data,
-            hora,
-            pacienteId: p?.id || null,
-            pacienteNome: p?.nome || nome,
-            tipo: $("ag_tipo").value || "consulta",
-            status: $("ag_status").value || "aguardando",
-            obs: $("ag_obs").value || ""
-          });
+          await addAgendaItem({ data, hora, tipo, status, obs, pacienteId: pacienteId||"", pacienteNome, pacienteTel });
+          toast("Agendamento salvo ✅");
 
           $("ag_hora").value = "";
-          $("ag_paciente_nome").value = "";
-          $("ag_paciente_tel").value = "";
           $("ag_obs").value = "";
 
-          toast("Agendamento salvo ✅");
-          await saveDraftForTab("agenda");
           await buildPreview();
         });
 
-        $("btnAgHoje").addEventListener("click", async ()=>{
-          window.__agendaMode = "day";
-          $("ag_data").value = todayISO();
-          await saveDraftForTab("agenda");
+        $("btnAgHoje").addEventListener("click", async () => {
+          $("ag_data").value = isoToday();
           await buildPreview();
         });
 
-        $("btnAgSemana").addEventListener("click", async ()=>{
-          window.__agendaMode = "week";
-          await saveDraftForTab("agenda");
+        $("btnAgSemana").addEventListener("click", async () => {
+          // marca um modo interno “semana” usando draft
+          await BTX_DB.put(BTX_DB.STORES.drafts, { key:"agenda_mode", value:"week" });
           await buildPreview();
         });
+
+        // padrão agenda mode: day
+        const m = await BTX_DB.get(BTX_DB.STORES.drafts, "agenda_mode");
+        if(!m) await BTX_DB.put(BTX_DB.STORES.drafts, { key:"agenda_mode", value:"day" });
+      },
+      build: async () => {
+        const modeObj = await BTX_DB.get(BTX_DB.STORES.drafts, "agenda_mode");
+        const mode = modeObj?.value || "day";
+
+        const date = formVal("ag_data") || isoToday();
+
+        if(mode === "week"){
+          const wk = await getAgendaWeek(date);
+          const title = `Agenda semanal (início: ${fmtBR(wk.start)})`;
+
+          const rows = wk.items.map(it => `
+            <tr>
+              <td>${esc(fmtBR(it.data))}</td>
+              <td>${esc(it.hora||"")}</td>
+              <td>${esc(it.pacienteNome||"")}</td>
+              <td>${esc(it.tipo||"")}</td>
+              <td>${esc(it.status||"")}</td>
+              <td>${esc(it.obs||"")}</td>
+            </tr>
+          `).join("");
+
+          return `
+            <div class="doc-title">${esc(title)}</div>
+            ${rows ? `
+              <table>
+                <thead><tr><th>Data</th><th>Hora</th><th>Paciente</th><th>Tipo</th><th>Status</th><th>Obs</th></tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            ` : `<p class="doc-line">Nenhum agendamento na semana.</p>`}
+          `;
+        }
+
+        // day
+        const list = await getAgendaByDate(date);
+        const title = `Agenda do dia — ${fmtBR(date)}`;
+
+        const rows = list.map(it => `
+          <tr>
+            <td>${esc(it.hora||"")}</td>
+            <td>${esc(it.pacienteNome||"")}</td>
+            <td>${esc(it.tipo||"")}</td>
+            <td>${esc(it.status||"")}</td>
+            <td>${esc(it.obs||"")}</td>
+          </tr>
+        `).join("");
+
+        return `
+          <div class="doc-title">${esc(title)}</div>
+          ${rows ? `
+            <table>
+              <thead><tr><th>Hora</th><th>Paciente</th><th>Tipo</th><th>Status</th><th>Obs</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          ` : `<p class="doc-line">Nenhum agendamento.</p>`}
+        `;
       }
     },
 
     prontuario: {
       title: "Prontuário",
-      sub: "Registro clínico por paciente (salva tudo).",
+      sub: "Registro clínico por paciente (por data).",
       renderForm: async () => {
-        const pacientes = await BTXDB.listPacientes();
-        const opts = pacientes
-          .sort((a,b)=>(a.nome||"").localeCompare(b.nome||""))
-          .map(p=> `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel?(" • "+esc(p.tel)):""}</option>`)
-          .join("");
+        const pacientes = await listPacientes();
+        const opts = pacientes.map(p => `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel ? " • "+esc(p.tel) : ""}</option>`).join("");
 
         return `
-          <div class="doc-title">Selecionar ou cadastrar paciente</div>
-
-          <label>Buscar rápido (nome/telefone)</label>
-          <input id="p_busca" placeholder="Digite para filtrar..." />
-
-          <label>Paciente</label>
-          <select id="p_select">
+          <label>Selecionar paciente</label>
+          <select id="pr_pacienteId">
             <option value="">— selecione —</option>
             ${opts}
           </select>
 
-          <div class="doc-title">Cadastrar novo</div>
-
-          <label>Nome</label>
-          <input id="p_nome" placeholder="Nome do paciente" />
-
           <div class="row">
             <div>
-              <label>Telefone</label>
-              <input id="p_tel" />
+              <label>Data do atendimento</label>
+              <input id="pr_data" type="date" value="${isoToday()}" />
             </div>
             <div>
-              <label>Nascimento</label>
-              <input id="p_nasc" type="date" />
+              <label>Procedimento</label>
+              <input id="pr_proced" placeholder="Ex.: restauração, extração, retorno..." />
             </div>
           </div>
 
-          <label>Endereço</label>
-          <input id="p_end" />
+          <label>Anotações / Evolução</label>
+          <textarea id="pr_anot"></textarea>
 
-          <div class="actions" style="justify-content:flex-start; margin-top:10px;">
-            <button class="btn btn-primary" type="button" id="btnPCriar">Salvar paciente</button>
-            <button class="btn btn-ghost" type="button" id="btnPVer">Ver histórico</button>
+          <div class="actions" style="justify-content:flex-start;">
+            <button class="btn btn-primary" id="btnPrSalvar" type="button">Salvar registro</button>
           </div>
 
-          <hr class="sep" />
-
-          <div class="doc-title">Registrar atendimento (no paciente selecionado)</div>
-
-          <div class="row">
-            <div>
-              <label>Data</label>
-              <input id="at_data" type="date" value="${todayISO()}" />
-            </div>
-            <div>
-              <label>Tipo</label>
-              <select id="at_tipo">
-                <option value="consulta">consulta</option>
-                <option value="retorno">retorno</option>
-                <option value="procedimento">procedimento</option>
-                <option value="avaliacao">avaliação</option>
-                <option value="urgencia">urgência</option>
-              </select>
-            </div>
-          </div>
-
-          <label>Descrição do que foi feito</label>
-          <textarea id="at_desc" placeholder="Ex.: anamnese, exame, procedimento realizado..."></textarea>
-
-          <label>Conduta / orientações</label>
-          <textarea id="at_cond" placeholder="Ex.: medicação, retorno, cuidados, encaminhamentos..."></textarea>
-
-          <div class="actions" style="justify-content:flex-start; margin-top:10px;">
-            <button class="btn btn-primary" type="button" id="btnATSalvar">Salvar atendimento</button>
-            <button class="btn btn-ghost" type="button" id="btnATSemana">Ver semana</button>
-          </div>
+          <p class="small">O prontuário fica salvo e você pode imprimir por paciente.</p>
         `;
       },
-      build: async () => {
-        const pacienteId = $("p_select")?.value || "";
-        if(!pacienteId){
-          return `<p class="doc-line">Selecione um paciente para ver o histórico.</p>`;
-        }
-        return await atendimentosTableHTML(pacienteId);
-      },
       afterRender: async () => {
-        const refreshSelect = async (keepId="")=>{
-          const pacientes = await BTXDB.listPacientes();
-          const sel = $("p_select");
-          const old = keepId || sel.value;
-          sel.innerHTML = `<option value="">— selecione —</option>` +
-            pacientes.sort((a,b)=>(a.nome||"").localeCompare(b.nome||""))
-              .map(p=> `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel?(" • "+esc(p.tel)):""}</option>`).join("");
-          sel.value = old;
-        };
+        $("btnPrSalvar").addEventListener("click", async () => {
+          const pacienteId = formVal("pr_pacienteId");
+          if(!pacienteId) return alert("Selecione um paciente.");
+          const data = formVal("pr_data") || isoToday();
+          const procedimento = formVal("pr_proced");
+          const anotacoes = formVal("pr_anot");
+          if(!procedimento && !anotacoes) return alert("Digite procedimento ou anotações.");
 
-        $("btnPCriar").addEventListener("click", async ()=>{
-          const nome = ($("p_nome").value||"").trim();
-          if(!nome){ toast("Digite o nome do paciente ❌"); return; }
-          const p = await BTXDB.upsertPaciente({
-            nome,
-            tel: ($("p_tel").value||"").trim(),
-            nasc: $("p_nasc").value || "",
-            end: ($("p_end").value||"").trim(),
-          });
-          toast("Paciente salvo ✅");
-          await refreshSelect(p.id);
-          $("p_nome").value = ""; $("p_tel").value=""; $("p_nasc").value=""; $("p_end").value="";
-          await saveDraftForTab("prontuario");
+          await addProntuarioRegistro({ pacienteId, data, procedimento, anotacoes });
+          toast("Registro salvo ✅");
+          $("pr_proced").value = "";
+          $("pr_anot").value = "";
           await buildPreview();
         });
+      },
+      build: async () => {
+        const pacienteId = formVal("pr_pacienteId");
+        if(!pacienteId) return `<p class="doc-line">Selecione um paciente para visualizar o prontuário.</p>`;
 
-        $("btnPVer").addEventListener("click", async ()=>{
-          await saveDraftForTab("prontuario");
-          await buildPreview();
-        });
+        const p = await BTX_DB.get(BTX_DB.STORES.pacientes, pacienteId);
+        const regs = await getProntuarioByPaciente(pacienteId);
 
-        $("btnATSalvar").addEventListener("click", async ()=>{
-          const pacienteId = $("p_select").value;
-          if(!pacienteId){ toast("Selecione um paciente ❌"); return; }
-          const data = $("at_data").value || todayISO();
-          const tipo = $("at_tipo").value || "consulta";
-          const desc = ($("at_desc").value||"").trim();
-          const cond = ($("at_cond").value||"").trim();
-          if(!desc){ toast("Descreva o atendimento ❌"); return; }
+        const head = `
+          ${docLine("Paciente", p?.nome || "")}
+          ${docLine("Telefone", p?.tel || "")}
+          ${docLine("Nascimento", p?.nasc ? fmtBR(p.nasc) : "")}
+          ${docLine("Endereço", p?.end || "")}
+        `;
 
-          await BTXDB.addAtendimento({
-            pacienteId,
-            data,
-            tipo,
-            descricao: desc,
-            conduta: cond
-          });
+        const rows = regs.map(r => `
+          <tr>
+            <td>${esc(fmtBR(r.data))}</td>
+            <td>${esc(r.procedimento || "")}</td>
+            <td>${esc(r.anotacoes || "")}</td>
+          </tr>
+        `).join("");
 
-          $("at_desc").value = "";
-          $("at_cond").value = "";
-          toast("Atendimento salvo ✅");
-          await saveDraftForTab("prontuario");
-          await buildPreview();
-        });
+        return `
+          <div class="doc-title">Identificação</div>
+          ${head || `<p class="doc-line">—</p>`}
 
-        $("btnATSemana").addEventListener("click", async ()=>{
-          const pacienteId = $("p_select").value;
-          if(!pacienteId){ toast("Selecione um paciente ❌"); return; }
-
-          const iso = $("at_data").value || todayISO();
-          const ws = weekStartISO(iso);
-          const we = addDaysISO(ws, 6);
-
-          const p = await BTXDB.getPaciente(pacienteId);
-          const list = await BTXDB.listAtendimentosByPaciente(pacienteId);
-          const weekItems = list
-            .filter(it => (it.data >= ws && it.data <= we))
-            .sort((a,b)=>(a.data||"").localeCompare(b.data||""));
-
-          const rows = weekItems.map(it=>`
-            <tr>
-              <td>${esc(fmtBRFromISO(it.data||""))}</td>
-              <td>${esc(it.tipo||"")}</td>
-              <td>${esc(it.descricao||"")}</td>
-              <td>${esc(it.conduta||"")}</td>
-            </tr>
-          `).join("");
-
-          $("pvBody").innerHTML = `
-            <div class="doc-title">Semana de atendimentos</div>
-            ${line("Paciente", p?.nome || "")}
-            ${line("Período", `${fmtBRFromISO(ws)} a ${fmtBRFromISO(we)}`)}
-            ${rows ? `
-              <table>
-                <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th>Conduta</th></tr></thead>
-                <tbody>${rows}</tbody>
-              </table>
-            ` : `<p class="doc-line">Nenhum atendimento nesta semana.</p>`}
-          `;
-          toast("Semana carregada ✅");
-          await saveDraftForTab("prontuario");
-          // mantém assinatura/footer atual
-        });
-
-        // busca rápida
-        $("p_busca").addEventListener("input", async ()=>{
-          const q = $("p_busca").value;
-          const found = q ? await BTXDB.searchPacientes(q) : await BTXDB.listPacientes();
-          const sel = $("p_select");
-          const old = sel.value;
-          sel.innerHTML = `<option value="">— selecione —</option>` +
-            found.sort((a,b)=>(a.nome||"").localeCompare(b.nome||""))
-              .map(p=> `<option value="${esc(p.id)}">${esc(p.nome)}${p.tel?(" • "+esc(p.tel)):""}</option>`).join("");
-          sel.value = old;
-        });
-
-        $("p_select").addEventListener("change", async ()=>{
-          await saveDraftForTab("prontuario");
-          await buildPreview();
-        });
+          <div class="doc-title">Registros</div>
+          ${rows ? `
+            <table>
+              <thead><tr><th>Data</th><th>Procedimento</th><th>Anotações</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          ` : `<p class="doc-line">Nenhum registro ainda.</p>`}
+        `;
       }
     },
 
     ficha: {
       title: "Ficha clínica",
-      sub: "Identificação, anamnese e planejamento.",
+      sub: "Identificação do paciente, anamnese e planejamento.",
       renderForm: async () => `
         <label>Nome do paciente</label>
-        <input id="f_paciente" required />
+        <input id="f_paciente" />
 
         <div class="row">
           <div>
@@ -711,15 +729,16 @@
         <textarea id="f_proc"></textarea>
       `,
       build: async () => {
+        const paciente = formVal("f_paciente");
         return [
-          line("Paciente", $("f_paciente")?.value?.trim()),
-          line("Nascimento", fmtBRFromISO($("f_nasc")?.value)),
-          line("Telefone", $("f_tel")?.value?.trim()),
-          line("Endereço", $("f_end")?.value?.trim()),
-          block("Motivo da consulta", $("f_motivo")?.value),
-          block("Anamnese", $("f_anamnese")?.value),
-          block("Planejamento", $("f_plan")?.value),
-          block("Procedimentos realizados hoje", $("f_proc")?.value),
+          docLine("Paciente", paciente),
+          docLine("Nascimento", formVal("f_nasc") ? fmtBR(formVal("f_nasc")) : ""),
+          docLine("Telefone", formVal("f_tel")),
+          docLine("Endereço", formVal("f_end")),
+          docBlock("Motivo da consulta", formVal("f_motivo")),
+          docBlock("Anamnese", formVal("f_anamnese")),
+          docBlock("Planejamento", formVal("f_plan")),
+          docBlock("Procedimentos realizados hoje", formVal("f_proc")),
         ].join("");
       }
     },
@@ -729,7 +748,7 @@
       sub: "Somente o essencial no PDF. Botões 1-clique + campo editável.",
       renderForm: async () => `
         <label>Paciente</label>
-        <input id="r_paciente" required />
+        <input id="r_paciente" />
 
         <div class="row">
           <div>
@@ -738,69 +757,113 @@
           </div>
           <div>
             <label>Data</label>
-            <input id="r_data" type="date" value="${todayISO()}" />
+            <input id="r_data" type="date" value="${isoToday()}" />
           </div>
         </div>
 
-        <div class="doc-title">Medicações rápidas (1 clique)</div>
+        <div class="doc-title">Medicações (1 clique)</div>
 
+        <div class="small">Analgésicos</div>
         <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="dipirona">dipirona</button>
           <button class="btn btn-ghost" type="button" data-rx="paracetamol">paracetamol</button>
+          <div></div>
+        </div>
 
+        <div class="small" style="margin-top:10px;">Anti-inflamatórios</div>
+        <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="ibuprofeno">ibuprofeno</button>
           <button class="btn btn-ghost" type="button" data-rx="nimesulida">nimesulida</button>
           <button class="btn btn-ghost" type="button" data-rx="diclofenaco">diclofenaco</button>
+        </div>
 
+        <div class="small" style="margin-top:10px;">Antibióticos</div>
+        <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="amoxicilina">amoxicilina</button>
           <button class="btn btn-ghost" type="button" data-rx="azitromicina">azitromicina</button>
           <button class="btn btn-ghost" type="button" data-rx="amoxclav">amox+clav</button>
+        </div>
 
+        <div class="small" style="margin-top:10px;">Hipertensão</div>
+        <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="losartana">losartana</button>
           <button class="btn btn-ghost" type="button" data-rx="enalapril">enalapril</button>
           <button class="btn btn-ghost" type="button" data-rx="amlodipino">amlodipino</button>
           <button class="btn btn-ghost" type="button" data-rx="hctz">HCTZ</button>
+          <div></div><div></div>
+        </div>
 
+        <div class="small" style="margin-top:10px;">Diabetes</div>
+        <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="metformina">metformina</button>
           <button class="btn btn-ghost" type="button" data-rx="glibenclamida">glibenclamida</button>
           <button class="btn btn-ghost" type="button" data-rx="gliclazida">gliclazida</button>
+        </div>
 
+        <div class="small" style="margin-top:10px;">Antifúngicos / Dermatológicos</div>
+        <div class="quickgrid">
           <button class="btn btn-ghost" type="button" data-rx="fluconazol">fluconazol</button>
           <button class="btn btn-ghost" type="button" data-rx="cetoconazol_creme">cetoconazol creme</button>
           <button class="btn btn-ghost" type="button" data-rx="miconazol_creme">miconazol creme</button>
           <button class="btn btn-ghost" type="button" data-rx="terbinafina_creme">terbinafina creme</button>
           <button class="btn btn-ghost" type="button" data-rx="shampoo_cetoconazol">shampoo cetoconazol</button>
+          <div></div>
         </div>
 
-        <p class="small">Clique para inserir no campo de prescrição. O PDF só imprime o que estiver no campo abaixo.</p>
+        <p class="small" style="margin-top:10px;">
+          Clique para inserir. Depois revise e edite (você é o responsável pela prescrição).
+        </p>
 
         <label>Prescrição (editável)</label>
-        <textarea id="r_corpo" placeholder="As medicações escolhidas aparecem aqui..."></textarea>
+        <textarea id="r_corpo" placeholder="As medicações aparecem aqui…"></textarea>
 
         <label>Orientações adicionais (opcional)</label>
-        <textarea id="r_orient" placeholder="Ex.: repouso, retorno, cuidados..."></textarea>
+        <textarea id="r_orient" placeholder="Ex.: repouso, retorno, cuidados…"></textarea>
       `,
-      build: async () => {
-        const paciente = ($("r_paciente").value||"").trim();
-        const cidade = ($("r_cidade").value||"").trim() || "Cidade";
-        const dataIso = $("r_data").value || todayISO();
-        const dataBR = fmtBRFromISO(dataIso);
-        const corpo = ($("r_corpo").value||"").trim();
-        const orient = ($("r_orient").value||"").trim();
-
-        return [
-          line("Paciente", paciente),
-          `<div class="doc-title">Prescrição</div>`,
-          corpo ? `<div class="doc-block">${esc(corpo)}</div>` : `<p class="doc-line">—</p>`,
-          orient ? block("Orientações", orient) : "",
-          `<p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>`
-        ].join("");
-      },
       afterRender: async () => {
-        // bind preset buttons
+        // botão RX
         $("formPanel").querySelectorAll("[data-rx]").forEach(btn=>{
-          btn.addEventListener("click", ()=>appendRxPreset(btn.dataset.rx));
+          btn.addEventListener("click", async () => {
+            const key = btn.dataset.rx;
+            const ta = $("r_corpo");
+            const insert = rxLine(key);
+            if(!insert) return;
+            const cur = (ta.value || "").trim();
+            ta.value = cur ? (cur + "\n\n" + insert) : insert;
+
+            // salva rascunho (não perde)
+            await BTX_DB.put(BTX_DB.STORES.drafts, { key:"rx_draft", value: ta.value });
+            await buildPreview();
+          });
         });
+
+        // carrega rascunho
+        const draft = await BTX_DB.get(BTX_DB.STORES.drafts, "rx_draft");
+        if(draft?.value && !$("r_corpo").value){
+          $("r_corpo").value = draft.value;
+        }
+
+        $("r_corpo").addEventListener("input", async () => {
+          await BTX_DB.put(BTX_DB.STORES.drafts, { key:"rx_draft", value: $("r_corpo").value });
+        });
+      },
+      build: async () => {
+        const paciente = formVal("r_paciente");
+        const cidade = formVal("r_cidade") || "Cidade";
+        const dataIso = formVal("r_data") || isoToday();
+        const dataBR = fmtBR(dataIso);
+
+        const corpo = formVal("r_corpo");
+        const orient = formVal("r_orient");
+
+        const presc = [corpo, orient ? ("\n\nOrientações:\n"+orient) : ""].join("");
+
+        return `
+          ${docLine("Paciente", paciente)}
+          <div class="doc-title">Prescrição</div>
+          <div class="doc-block">${esc(presc || "")}</div>
+          <p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>
+        `;
       }
     },
 
@@ -809,7 +872,7 @@
       sub: "Comprovação de pagamento / prestação de serviço.",
       renderForm: async () => `
         <label>Nome do pagador (paciente)</label>
-        <input id="rc_pagador" required />
+        <input id="rc_pagador" />
 
         <div class="row">
           <div>
@@ -823,10 +886,10 @@
         </div>
 
         <label>Referente a</label>
-        <input id="rc_ref" placeholder="Ex.: Consulta / Procedimento / Sessão..." />
+        <input id="rc_referente" placeholder="Ex.: Consulta / Procedimento / Sessão..." />
 
         <label>Observações (opcional)</label>
-        <textarea id="rc_obs" placeholder="Ex.: serviço prestado, condições..."></textarea>
+        <textarea id="rc_obs"></textarea>
 
         <div class="row">
           <div>
@@ -835,28 +898,29 @@
           </div>
           <div>
             <label>Data</label>
-            <input id="rc_data" type="date" value="${todayISO()}" />
+            <input id="rc_data" type="date" value="${isoToday()}" />
           </div>
         </div>
       `,
       build: async () => {
-        const pagador = ($("rc_pagador").value||"").trim();
-        const valor = ($("rc_valor").value||"").trim();
-        const ref = ($("rc_ref").value||"").trim();
-        const forma = ($("rc_forma").value||"").trim();
-        const cidade = ($("rc_cidade").value||"").trim() || "Cidade";
-        const dataBR = fmtBRFromISO($("rc_data").value || todayISO());
+        const pagador = formVal("rc_pagador");
+        const valor = formVal("rc_valor");
+        const referente = formVal("rc_referente");
+        const forma = formVal("rc_forma");
+        const cidade = formVal("rc_cidade") || "Cidade";
+        const dataIso = formVal("rc_data") || isoToday();
+        const dataBR = fmtBR(dataIso);
 
         const valorFmt = valor ? Number(valor).toFixed(2) : "";
 
-        return [
-          `<div class="doc-title">Recibo</div>`,
-          `<p class="doc-line">Recebi de <strong>${esc(pagador)}</strong> a quantia de <strong>R$ ${esc(valorFmt || "0,00")}</strong>.</p>`,
-          ref ? `<p class="doc-line"><strong>Referente a:</strong> ${esc(ref)}</p>` : "",
-          forma ? `<p class="doc-line"><strong>Forma de pagamento:</strong> ${esc(forma)}</p>` : "",
-          block("Observações", $("rc_obs").value),
-          `<p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>`
-        ].join("");
+        return `
+          <div class="doc-title">Declaração de Recibo</div>
+          <p class="doc-line">Recebi de <strong>${esc(pagador)}</strong> a quantia de <strong>R$ ${esc(valorFmt || "0,00")}</strong>.</p>
+          ${referente ? `<p class="doc-line"><strong>Referente a:</strong> ${esc(referente)}</p>` : ""}
+          ${forma ? `<p class="doc-line"><strong>Forma de pagamento:</strong> ${esc(forma)}</p>` : ""}
+          ${docBlock("Observações", formVal("rc_obs"))}
+          <p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>
+        `;
       }
     },
 
@@ -879,9 +943,10 @@
             </div>
           `;
         }
+
         return `
-          <label>Paciente</label>
-          <input id="o_paciente" required />
+          <label>Nome do paciente</label>
+          <input id="o_paciente" />
 
           <label>Observações</label>
           <textarea id="o_obs"></textarea>
@@ -896,20 +961,21 @@
             </div>
             <div>
               <label>Data</label>
-              <input id="o_data" type="date" value="${todayISO()}" />
+              <input id="o_data" type="date" value="${isoToday()}" />
             </div>
           </div>
         `;
       },
       build: async () => {
-        const paciente = ($("o_paciente").value||"").trim();
-        const cidade = ($("o_cidade").value||"").trim() || "Cidade";
-        const dataBR = fmtBRFromISO($("o_data").value || todayISO());
+        const paciente = formVal("o_paciente");
+        const cidade = formVal("o_cidade") || "Cidade";
+        const dataIso = formVal("o_data") || isoToday();
+        const dataBR = fmtBR(dataIso);
 
         const itens = [];
         for (let i=1;i<=10;i++){
-          const d = ($(`o_d${i}`)?.value||"").trim();
-          const rawV = ($(`o_v${i}`)?.value||"").trim();
+          const d = formVal(`o_d${i}`);
+          const rawV = formVal(`o_v${i}`);
           if (d || rawV){
             itens.push({ desc: d || "", valor: rawV ? Number(rawV) : 0 });
           }
@@ -932,12 +998,12 @@
           table = `<p class="doc-line">Nenhum procedimento informado.</p>`;
         }
 
-        return [
-          line("Paciente", paciente),
-          table,
-          block("Observações", $("o_obs").value),
-          `<p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>`
-        ].join("");
+        return `
+          ${docLine("Paciente", paciente)}
+          ${table}
+          ${docBlock("Observações", formVal("o_obs"))}
+          <p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>
+        `;
       }
     },
 
@@ -945,8 +1011,8 @@
       title: "Laudo",
       sub: "Relatório estruturado com conclusão.",
       renderForm: async () => `
-        <label>Paciente</label>
-        <input id="l_paciente" required />
+        <label>Nome do paciente</label>
+        <input id="l_paciente" />
 
         <label>Título</label>
         <input id="l_titulo" placeholder="Ex.: Laudo clínico / radiográfico..." />
@@ -964,21 +1030,23 @@
           </div>
           <div>
             <label>Data</label>
-            <input id="l_data" type="date" value="${todayISO()}" />
+            <input id="l_data" type="date" value="${isoToday()}" />
           </div>
         </div>
       `,
       build: async () => {
-        const paciente = ($("l_paciente").value||"").trim();
-        const cidade = ($("l_cidade").value||"").trim() || "Cidade";
-        const dataBR = fmtBRFromISO($("l_data").value || todayISO());
-        return [
-          line("Paciente", paciente),
-          line("Título", $("l_titulo").value),
-          block("Descrição detalhada", $("l_desc").value),
-          block("Conclusão / Impressão diagnóstica", $("l_conc").value),
-          `<p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>`
-        ].join("");
+        const paciente = formVal("l_paciente");
+        const cidade = formVal("l_cidade") || "Cidade";
+        const dataIso = formVal("l_data") || isoToday();
+        const dataBR = fmtBR(dataIso);
+
+        return `
+          ${docLine("Paciente", paciente)}
+          ${docLine("Título", formVal("l_titulo"))}
+          ${docBlock("Descrição detalhada", formVal("l_desc"))}
+          ${docBlock("Conclusão / Impressão diagnóstica", formVal("l_conc"))}
+          <p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>
+        `;
       }
     },
 
@@ -986,14 +1054,14 @@
       title: "Atestado",
       sub: "Justificativa e dias de afastamento (opcional).",
       renderForm: async () => `
-        <label>Paciente</label>
-        <input id="a_paciente" required />
+        <label>Nome do paciente</label>
+        <input id="a_paciente" />
 
         <label>Dias de afastamento (opcional)</label>
         <input id="a_dias" type="number" min="0" step="1" placeholder="Ex.: 2" />
 
         <label>Texto do atestado</label>
-        <textarea id="a_desc" placeholder="Ex.: Atesto para fins..."></textarea>
+        <textarea id="a_desc" placeholder="Ex.: Atesto para os devidos fins que..."></textarea>
 
         <div class="row">
           <div>
@@ -1002,229 +1070,202 @@
           </div>
           <div>
             <label>Data</label>
-            <input id="a_data" type="date" value="${todayISO()}" />
+            <input id="a_data" type="date" value="${isoToday()}" />
           </div>
         </div>
       `,
       build: async () => {
-        const paciente = ($("a_paciente").value||"").trim();
-        const cidade = ($("a_cidade").value||"").trim() || "Cidade";
-        const dataBR = fmtBRFromISO($("a_data").value || todayISO());
-        const diasRaw = ($("a_dias").value||"").trim();
+        const paciente = formVal("a_paciente");
+        const cidade = formVal("a_cidade") || "Cidade";
+        const dataIso = formVal("a_data") || isoToday();
+        const dataBR = fmtBR(dataIso);
+        const diasRaw = formVal("a_dias");
         const dias = diasRaw ? Number(diasRaw) : null;
 
-        return [
-          line("Paciente", paciente),
-          (dias && !Number.isNaN(dias) && dias > 0) ? `<p class="doc-line"><strong>Afastamento:</strong> ${dias} dia(s).</p>` : "",
-          block("Atestado", $("a_desc").value),
-          `<p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>`
-        ].join("");
+        return `
+          ${docLine("Paciente", paciente)}
+          ${(dias && !Number.isNaN(dias) && dias > 0) ? `<p class="doc-line"><strong>Afastamento:</strong> ${dias} dia(s).</p>` : ""}
+          ${docBlock("Atestado", formVal("a_desc"))}
+          <p class="doc-line"><strong>${esc(cidade)}</strong>, ${esc(dataBR)}</p>
+        `;
       }
     }
   };
 
-  let currentTab = "agenda";
-
-  async function renderTab(tab){
-    currentTab = tab;
-
-    document.querySelectorAll(".tabbtn").forEach(b=>{
-      b.classList.toggle("active", b.dataset.tab === tab);
+  /* =========================
+     AÇÕES GERAIS
+     ========================= */
+  function clearCurrentForm(){
+    const panel = $("formPanel");
+    panel.querySelectorAll("input,textarea,select").forEach(el=>{
+      // mantém dates com hoje quando limpar
+      if(el.type === "date"){
+        el.value = isoToday();
+      } else {
+        el.value = "";
+      }
     });
-
-    $("docTitle").textContent = TABS[tab].title;
-    $("docSub").textContent = TABS[tab].sub;
-
-    const formHTML = await TABS[tab].renderForm();
-    $("formPanel").innerHTML = formHTML;
-
-    // apply draft
-    const draft = await loadDraftForTab(tab);
-    await applyDraftToForm(draft);
-
-    // listeners
-    $("formPanel").querySelectorAll("input,textarea,select").forEach(el=>{
-      el.addEventListener("input", async ()=>{
-        await saveDraftForTab(tab);
-        await buildPreview();
-      });
-      el.addEventListener("change", async ()=>{
-        await saveDraftForTab(tab);
-        await buildPreview();
-      });
-    });
-
-    if (typeof TABS[tab].afterRender === "function") await TABS[tab].afterRender();
-
-    await buildPreview();
   }
 
-  async function buildPreview(){
-    const prof = await BTXDB.getProfissional();
-    const lines = profLines(prof);
+  function downloadText(filename, text, mime="text/plain"){
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
 
-    $("profResumo").textContent = (lines.length ? `${lines[0]}${lines[1] ? " — " + lines[1] : ""}` : "—");
+  async function exportJSON(){
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      app: "BTX Docs Saúde",
+      version: APP_VER,
+      profissional: (await BTX_DB.get(BTX_DB.STORES.profissional, "prof"))?.data || null,
+      pacientes: await BTX_DB.getAll(BTX_DB.STORES.pacientes),
+      agenda: await BTX_DB.getAll(BTX_DB.STORES.agenda),
+      prontuario: await BTX_DB.getAll(BTX_DB.STORES.prontuario),
+      drafts: await BTX_DB.getAll(BTX_DB.STORES.drafts),
+    };
+    downloadText(`btx_backup_${Date.now()}.json`, JSON.stringify(payload, null, 2), "application/json");
+  }
 
-    // Header right: address + datetime
-    const end = prof?.end || "";
-    $("pvAddr").textContent = end || "Endereço não informado";
-    $("pvDateTime").textContent = nowBR();
+  async function importJSON(file){
+    const txt = await file.text();
+    const data = JSON.parse(txt);
 
-    // Prof block (abaixo do título)
-    const conselhoReg = (prof?.conselho || prof?.reg) ? `${prof.conselho || ""} ${prof.reg || ""}`.trim() : "";
-    const profBlock = `
-      <div class="line strong">${esc(prof?.nome || "—")}</div>
-      <div class="line">${esc(prof?.esp || "")}</div>
-      <div class="line">${esc(conselhoReg || "")}</div>
-      <div class="line">${esc(prof?.tel || "")}${prof?.email ? (" • "+esc(prof.email)) : ""}</div>
-    `;
-    $("pvProfBlock").innerHTML = prof?.nome ? profBlock : `<div class="line">Preencha o profissional para assinatura e rodapé.</div>`;
-
-    // Title/sub
-    $("pvTitle").textContent = TABS[currentTab].title;
-    $("pvSub").textContent = TABS[currentTab].sub;
-
-    // Body
-    $("pvBody").innerHTML = await TABS[currentTab].build();
-
-    // Footer: endereço + contato (o que você pediu)
-    const footer = prof?.nome ? `
-      <div><b>${esc(prof.nome)}</b>${prof.esp?(" • "+esc(prof.esp)):""}</div>
-      <div>${esc((prof.end||"").trim())}</div>
-      <div>${esc((prof.tel||"").trim())}${prof.email?(" • "+esc(prof.email)):""}</div>
-    ` : `Preencha os dados do profissional para completar o rodapé.`;
-    $("pvFooter").innerHTML = footer;
-
-    // Signatures
-    if (prof?.nome){
-      $("pvSign").innerHTML = `
-        <div class="sigrow">
-          <div class="sig">
-            <div class="line"></div>
-            <div><b>${esc(prof.nome)}</b></div>
-            <div style="font-size:12px;color:#334155;">${esc(conselhoReg)}</div>
-          </div>
-          <div class="sig">
-            <div class="line"></div>
-            <div><b>Assinatura do(a) paciente / responsável</b></div>
-            <div style="font-size:12px;color:#334155;">(quando aplicável)</div>
-          </div>
-        </div>
-      `;
-    } else {
-      $("pvSign").innerHTML = `<div class="small" style="color:#334155;">(Preencha o profissional para assinatura.)</div>`;
+    if(!data || typeof data !== "object") throw new Error("JSON inválido.");
+    // escreve tudo
+    if(data.profissional){
+      await setProf(data.profissional);
     }
+    if(Array.isArray(data.pacientes)){
+      for (const p of data.pacientes) await BTX_DB.put(BTX_DB.STORES.pacientes, p);
+    }
+    if(Array.isArray(data.agenda)){
+      for (const a of data.agenda) await BTX_DB.put(BTX_DB.STORES.agenda, a);
+    }
+    if(Array.isArray(data.prontuario)){
+      for (const r of data.prontuario) await BTX_DB.put(BTX_DB.STORES.prontuario, r);
+    }
+    if(Array.isArray(data.drafts)){
+      for (const d of data.drafts) await BTX_DB.put(BTX_DB.STORES.drafts, d);
+    }
+  }
+
+  async function resetAll(){
+    if(!confirm("Tem certeza? Isso apaga tudo no aparelho (profissional, pacientes, agenda e prontuário).")) return;
+    await BTX_DB.clear(BTX_DB.STORES.profissional);
+    await BTX_DB.clear(BTX_DB.STORES.pacientes);
+    await BTX_DB.clear(BTX_DB.STORES.agenda);
+    await BTX_DB.clear(BTX_DB.STORES.prontuario);
+    await BTX_DB.clear(BTX_DB.STORES.drafts);
+    toast("Tudo zerado ✅");
+    location.reload();
   }
 
   /* =========================
-     Buttons (UI)
+     INIT
      ========================= */
-  $("btnSalvarProf").addEventListener("click", async ()=>{
-    const p = readProfFromUI();
-    if (!p.nome){
-      toast("Digite pelo menos o nome do profissional ❌");
-      return;
-    }
-    await BTXDB.saveProfissional(p);
-    toast("Profissional salvo ✅");
-    await buildPreview();
-  });
-
-  $("btnLimparProf").addEventListener("click", async ()=>{
-    await BTXDB.clearProfissional();
-    setProfToUI(null);
-    toast("Profissional limpo ✅");
-    await buildPreview();
-  });
-
-  $("btnLimparForm").addEventListener("click", async ()=>{
-    $("formPanel").querySelectorAll("input,textarea,select").forEach(el=>{
-      el.value = "";
-    });
-    // padrão de datas
-    $("formPanel").querySelectorAll('input[type="date"]').forEach(el=> el.value = todayISO());
-    toast("Formulário limpo ✅");
-    await saveDraftForTab(currentTab);
-    await buildPreview();
-  });
-
-  $("btnPrint").addEventListener("click", async ()=>{
-    await buildPreview();
-    window.print();
-  });
-
-  $("btnDownload").addEventListener("click", async ()=>{
-    await buildPreview();
-    const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BTX Docs — Export</title>
-      <style>body{font-family:Arial,sans-serif;background:#fff;margin:0;padding:14px;} .paper{max-width:900px;margin:0 auto}</style>
-      </head><body>${$("paper").outerHTML}</body></html>`;
-    const name = `BTX_${currentTab}_${Date.now()}.html`;
-    downloadText(name, html, "text/html;charset=utf-8");
-    toast("Baixado ✅");
-  });
-
-  $("btnExportAll").addEventListener("click", async ()=>{
-    const data = await BTXDB.exportAll();
-    downloadText(`BTX_Backup_${Date.now()}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
-    toast("Backup baixado ✅");
-  });
-
-  $("btnResetAll").addEventListener("click", async ()=>{
-    if(!confirm("Tem certeza? Isso apaga TODOS os dados do aparelho (profissional, pacientes, agenda, prontuário).")) return;
-    await BTXDB.nukeAll();
-    toast("Tudo zerado ✅");
-    location.reload();
-  });
-
-  $("btnChangeKey").addEventListener("click", async ()=>{
-    const cur = prompt("Digite a chave atual:");
-    if(!cur) return;
-    const saved = (await getSavedKey()).toLowerCase();
-    if(cur.trim().toLowerCase() !== saved){
-      toast("Chave incorreta ❌");
-      return;
-    }
-    const nova = prompt("Nova chave (minúsculo):", saved);
-    if(!nova) return;
-    await setSavedKey(nova.trim().toLowerCase());
-    await setUnlocked(false);
-    toast("Chave alterada ✅ Faça login de novo.");
-    await showLogin(true);
-  });
-
-  $("btnForceUpdate").addEventListener("click", async ()=>{
-    // força reload (e ajuda com cache)
-    toast("Atualizando…");
-    location.href = location.pathname + "?v=" + Date.now();
-  });
-
-  /* Tabs init */
-  document.querySelectorAll(".tabbtn").forEach(btn=>{
-    btn.addEventListener("click", ()=>renderTab(btn.dataset.tab));
-  });
-
-  /* Net pill */
-  function updateNet(){
-    $("netPill").textContent = navigator.onLine ? "Online" : "Offline";
-  }
-  window.addEventListener("online", updateNet);
-  window.addEventListener("offline", updateNet);
-
-  /* Init app */
   async function init(){
-    updateNet();
+    setupLogin();
 
-    const prof = await BTXDB.getProfissional();
-    setProfToUI(prof);
+    // Profissional
+    const prof = await getProf();
+    profToUI(prof);
 
-    // defaults for key
-    const savedKey = await BTXDB.getSetting("login_key", null);
-    if(!savedKey) await setSavedKey(DEFAULT_KEY);
+    $("btnProfSalvar").addEventListener("click", async () => {
+      const p = profFromUI();
+      if(!p.nome) return alert("Digite pelo menos o nome do profissional.");
+      await setProf(p);
+      toast("Profissional salvo ✅");
+      await buildPreview();
+    });
 
-    await showLogin(false);
+    $("btnProfLimpar").addEventListener("click", async () => {
+      await BTX_DB.clear(BTX_DB.STORES.profissional);
+      profToUI(null);
+      toast("Profissional limpo ✅");
+      await buildPreview();
+    });
 
+    // Tabs
+    document.querySelectorAll(".tabbtn").forEach(btn=>{
+      btn.addEventListener("click", async () => {
+        // agenda volta ao modo day por padrão
+        if(btn.dataset.tab === "agenda"){
+          await BTX_DB.put(BTX_DB.STORES.drafts, { key:"agenda_mode", value:"day" });
+        }
+        await renderTab(btn.dataset.tab);
+      });
+    });
+
+    // Botões preview
+    $("btnClearForm").addEventListener("click", async () => {
+      clearCurrentForm();
+      toast("Formulário limpo ✅");
+      await buildPreview();
+    });
+
+    $("btnDownloadHTML").addEventListener("click", async () => {
+      // baixa o HTML do papel (o que está visível)
+      downloadText(`btx_documento_${currentTab}_${Date.now()}.html`, lastBuiltHTML, "text/html");
+      toast("HTML baixado ✅");
+    });
+
+    $("btnPrint").addEventListener("click", async () => {
+      await buildPreview();
+      window.print();
+    });
+
+    // Backup
+    $("btnExportJSON").addEventListener("click", exportJSON);
+
+    $("importFile").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if(!file) return;
+      try{
+        await importJSON(file);
+        toast("Importado ✅");
+        location.reload();
+      }catch(err){
+        alert("Falha ao importar: " + err.message);
+      } finally {
+        e.target.value = "";
+      }
+    });
+
+    $("btnResetAll").addEventListener("click", resetAll);
+
+    // Rede status
+    const netPill = $("netPill");
+    const setNet = () => {
+      netPill.textContent = navigator.onLine ? "Online" : "Offline";
+      netPill.style.borderColor = navigator.onLine ? "rgba(25,226,140,.45)" : "rgba(248,113,113,.45)";
+    };
+    window.addEventListener("online", setNet);
+    window.addEventListener("offline", setNet);
+    setNet();
+
+    // Hard refresh (mata cache do SW na prática)
+    $("btnHardRefresh").addEventListener("click", async () => {
+      try{
+        if("serviceWorker" in navigator){
+          const regs = await navigator.serviceWorker.getRegistrations();
+          for (const r of regs) await r.update();
+        }
+      } finally {
+        toast("Atualização solicitada ✅");
+        location.href = location.pathname + "?v=" + Date.now();
+      }
+    });
+
+    // start
     await renderTab("agenda");
   }
 
-  init();
+  document.addEventListener("DOMContentLoaded", init);
 })();
