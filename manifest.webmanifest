@@ -1,7 +1,7 @@
 {
   "name": "BTX Docs Saúde — Agenda + Prontuário + Documentos",
   "short_name": "BTX Docs",
-  "description": "Agenda clínica + prontuário por paciente + documentos (offline real) — BTX Docs Saúde",
+  "description": "Agenda clínica + prontuário + documentos (offline real) — BTX Docs Saúde",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
