@@ -379,4 +379,770 @@
           </div>
 
           <p class="small" style="margin-top:10px;">
-            Dica
+            Dica: “Ver semana” monta o PDF da semana. Para registrar procedimentos, use a aba <b>Prontuário</b>.
+          </p>
+        `;
+      },
+      build: async () => {
+        const dateISO = $("ag_date")?.value || todayISO();
+        const mode = window.__agendaMode || "day";
+        if(mode === "week"){
+          const start = weekStartISO(dateISO);
+          const list = await listAgendaWeek(start);
+          return `
+            <div class="doc-title">Semana (início): ${esc(brDate(start))}</div>
+            ${agendaTableHTML(list)}
+          `;
+        }
+        const list = await listAgendaByDate(dateISO);
+        return `
+          <div class="doc-title">Agenda do dia — ${esc(brDate(dateISO))}</div>
+          ${agendaTableHTML(list)}
+        `;
+      },
+      afterRender: async () => {
+        window.__agendaMode = "day";
+
+        const search = $("ag_search");
+        const pick = $("ag_patientPick");
+        async function refreshPick(){
+          const term = search.value;
+          const found = await patientSearch(term);
+          pick.innerHTML = `<option value="">— digite acima ou cadastre pelo nome —</option>` +
+            found.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.phone ? " • " + esc(p.phone) : ""}</option>`).join("");
+        }
+
+        search.addEventListener("input", refreshPick);
+        await refreshPick();
+
+        $("btnAgSave").addEventListener("click", async () => {
+          const date = $("ag_date").value || todayISO();
+          const time = $("ag_time").value || "";
+          const name = $("ag_name").value.trim();
+          const phone = $("ag_phone").value.trim();
+          const patientPick = pick.value;
+
+          let patientId = "";
+          if(patientPick){
+            patientId = patientPick;
+          } else {
+            if(!name){
+              alert("Digite o nome do paciente.");
+              return;
+            }
+            const p = await upsertPatient({ name, phone });
+            patientId = p?.id || "";
+          }
+
+          // se escolheu paciente, preenche nome/telefone pra agenda
+          let patientName = name;
+          let patientPhone = phone;
+          if(patientPick){
+            const p = await BTXDB.get(BTXDB.STORES.patients, patientPick);
+            patientName = p?.name || name || "";
+            patientPhone = p?.phone || phone || "";
+          }
+
+          await addAgendaItem({
+            date, time,
+            patientName, patientPhone,
+            patientId,
+            type: $("ag_type").value,
+            status: $("ag_status").value,
+            obs: $("ag_obs").value
+          });
+
+          $("ag_time").value = "";
+          $("ag_obs").value = "";
+          $("ag_name").value = "";
+          $("ag_phone").value = "";
+          toast("Agendamento salvo ✅");
+          await buildPreview();
+        });
+
+        $("btnAgDay").addEventListener("click", async () => {
+          window.__agendaMode = "day";
+          toast("Modo: agenda do dia ✅");
+          await buildPreview();
+        });
+
+        $("btnAgWeek").addEventListener("click", async () => {
+          window.__agendaMode = "week";
+          toast("Modo: agenda da semana ✅");
+          await buildPreview();
+        });
+      }
+    },
+
+    prontuario: {
+      title: "Prontuário",
+      sub: "Registro do que foi feito no paciente — por dia/semana, tudo salvo.",
+      renderForm: async () => {
+        const d0 = todayISO();
+        return `
+          <label>Buscar paciente (nome/telefone)</label>
+          <input id="pr_search" placeholder="Digite para buscar..." />
+
+          <label>Selecionar paciente</label>
+          <select id="pr_pick">
+            <option value="">— selecione —</option>
+          </select>
+
+          <div class="row">
+            <div>
+              <label>Data do atendimento</label>
+              <input id="pr_date" type="date" value="${esc(d0)}" />
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="pr_status">
+                <option value="atendido">atendido</option>
+                <option value="retorno">retorno</option>
+                <option value="em acompanhamento">em acompanhamento</option>
+              </select>
+            </div>
+          </div>
+
+          <label>Título (opcional)</label>
+          <input id="pr_title" placeholder="Ex.: Pós-op 7 dias / Revisão / Queixa principal..." />
+
+          <label>Procedimentos realizados</label>
+          <textarea id="pr_proc" placeholder="Ex.: raspagem, restauração, curativo, orientação..." ></textarea>
+
+          <label>Evolução / Observações</label>
+          <textarea id="pr_text" placeholder="Escreva a evolução do paciente..." ></textarea>
+
+          <div class="actions" style="justify-content:flex-start; margin-top:10px;">
+            <button class="btn btn-primary" type="button" id="btnPrSave">Salvar atendimento</button>
+            <button class="btn btn-ghost" type="button" id="btnPrWeek">Exportar semana</button>
+          </div>
+
+          <p class="small" style="margin-top:10px;">
+            “Exportar semana” gera um prontuário semanal no preview pronto pra PDF.
+          </p>
+        `;
+      },
+      build: async () => {
+        const pid = $("pr_pick")?.value || "";
+        if(!pid) return `<p class="doc-line">Selecione um paciente para visualizar o prontuário.</p>`;
+
+        const p = await BTXDB.get(BTXDB.STORES.patients, pid);
+        const notes = await getNotesByPatient(pid);
+
+        if(!notes.length){
+          return `
+            ${line("Paciente", p?.name || "")}
+            <p class="doc-line">Sem registros ainda. Salve um atendimento para começar.</p>
+          `;
+        }
+
+        // modo semana?
+        const mode = window.__prMode || "all";
+        if(mode === "week"){
+          const base = $("pr_date")?.value || todayISO();
+          const start = weekStartISO(base);
+          const end = addDaysISO(start, 6);
+          const wk = notes.filter(n => n.dateISO >= start && n.dateISO <= end);
+
+          if(!wk.length){
+            return `
+              ${line("Paciente", p?.name || "")}
+              <div class="doc-title">Semana ${esc(brDate(start))} a ${esc(brDate(end))}</div>
+              <p class="doc-line">Nenhum atendimento nessa semana.</p>
+            `;
+          }
+
+          return `
+            ${line("Paciente", p?.name || "")}
+            <div class="doc-title">Prontuário semanal — ${esc(brDate(start))} a ${esc(brDate(end))}</div>
+            ${wk.map(n => `
+              <div class="doc-block">
+                <b>${esc(brDate(n.dateISO))}</b> • ${esc(n.status || "")}${n.title ? ` • ${esc(n.title)}` : ""}
+
+                ${n.procedure ? `\n\nProcedimentos:\n${esc(n.procedure)}` : ""}
+
+                ${n.text ? `\n\nEvolução:\n${esc(n.text)}` : ""}
+              </div>
+            `).join("")}
+          `;
+        }
+
+        return `
+          ${line("Paciente", p?.name || "")}
+          <div class="doc-title">Registros</div>
+          ${notes.map(n => `
+            <div class="doc-block">
+              <b>${esc(brDate(n.dateISO))}</b> • ${esc(n.status || "")}${n.title ? ` • ${esc(n.title)}` : ""}
+
+              ${n.procedure ? `\n\nProcedimentos:\n${esc(n.procedure)}` : ""}
+
+              ${n.text ? `\n\nEvolução:\n${esc(n.text)}` : ""}
+            </div>
+          `).join("")}
+        `;
+      },
+      afterRender: async () => {
+        window.__prMode = "all";
+        const search = $("pr_search");
+        const pick = $("pr_pick");
+
+        async function refreshPick(){
+          const term = search.value;
+          const found = await patientSearch(term);
+          pick.innerHTML = `<option value="">— selecione —</option>` +
+            found.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.phone ? " • " + esc(p.phone) : ""}</option>`).join("");
+        }
+
+        search.addEventListener("input", refreshPick);
+        pick.addEventListener("change", buildPreview);
+        await refreshPick();
+
+        $("btnPrSave").addEventListener("click", async () => {
+          const pid = pick.value;
+          if(!pid){ alert("Selecione um paciente."); return; }
+
+          await addNote({
+            patientId: pid,
+            dateISO: $("pr_date").value || todayISO(),
+            status: $("pr_status").value || "atendido",
+            title: $("pr_title").value,
+            procedure: $("pr_proc").value,
+            text: $("pr_text").value
+          });
+
+          $("pr_title").value = "";
+          $("pr_proc").value = "";
+          $("pr_text").value = "";
+          toast("Atendimento salvo ✅");
+          await buildPreview();
+        });
+
+        $("btnPrWeek").addEventListener("click", async () => {
+          window.__prMode = "week";
+          toast("Prontuário semanal no preview ✅");
+          await buildPreview();
+        });
+      }
+    },
+
+    ficha: {
+      title: "Ficha clínica",
+      sub: "Identificação do paciente, anamnese e planejamento.",
+      renderForm: async () => `
+        <label>Nome do paciente</label>
+        <input id="f_paciente" required />
+
+        <div class="row">
+          <div>
+            <label>Nascimento</label>
+            <input id="f_nasc" type="date" />
+          </div>
+          <div>
+            <label>Telefone</label>
+            <input id="f_tel" />
+          </div>
+        </div>
+
+        <label>Endereço</label>
+        <input id="f_end" />
+
+        <label>Motivo da consulta</label>
+        <textarea id="f_motivo"></textarea>
+
+        <label>Anamnese</label>
+        <textarea id="f_anamnese"></textarea>
+
+        <label>Planejamento</label>
+        <textarea id="f_plan"></textarea>
+
+        <label>Procedimentos realizados</label>
+        <textarea id="f_proc"></textarea>
+      `,
+      build: async () => {
+        return [
+          line("Paciente", $("f_paciente")?.value.trim()),
+          line("Nascimento", brDate($("f_nasc")?.value || "")),
+          line("Telefone", $("f_tel")?.value.trim()),
+          line("Endereço", $("f_end")?.value.trim()),
+          block("Motivo da consulta", $("f_motivo")?.value.trim()),
+          block("Anamnese", $("f_anamnese")?.value.trim()),
+          block("Planejamento", $("f_plan")?.value.trim()),
+          block("Procedimentos realizados", $("f_proc")?.value.trim()),
+        ].join("");
+      }
+    },
+
+    receita: {
+      title: "Receituário",
+      sub: "Limpo, profissional e editável. Só imprime o que você revisou.",
+      renderForm: async () => {
+        const draft = await getDraft("draft_receita") || {};
+        const d0 = draft.data || todayISO();
+        return `
+          <label>Paciente</label>
+          <input id="r_paciente" value="${esc(draft.paciente || "")}" />
+
+          <div class="row">
+            <div>
+              <label>Cidade</label>
+              <input id="r_cidade" value="${esc(draft.cidade || "")}" placeholder="Cidade" />
+            </div>
+            <div>
+              <label>Data</label>
+              <input id="r_data" type="date" value="${esc(d0)}" />
+            </div>
+          </div>
+
+          <div class="doc-title">Modelos rápidos (1 clique) — revise antes do PDF</div>
+
+          <div class="small" style="margin:6px 0 0;">Analgésicos</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="dipirona">dipirona</button>
+            <button class="btn btn-ghost" type="button" data-rx="paracetamol">paracetamol</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Anti-inflamatórios</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="ibuprofeno">ibuprofeno</button>
+            <button class="btn btn-ghost" type="button" data-rx="nimesulida">nimesulida</button>
+            <button class="btn btn-ghost" type="button" data-rx="diclofenaco">diclofenaco</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Antibióticos</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="amoxicilina">amoxicilina</button>
+            <button class="btn btn-ghost" type="button" data-rx="azitromicina">azitromicina</button>
+            <button class="btn btn-ghost" type="button" data-rx="amoxclav">amox+clav</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Hipertensão</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="losartana">losartana</button>
+            <button class="btn btn-ghost" type="button" data-rx="enalapril">enalapril</button>
+            <button class="btn btn-ghost" type="button" data-rx="anlodipino">anlodipino</button>
+            <button class="btn btn-ghost" type="button" data-rx="hidrocloro">HCTZ</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Diabetes</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="metformina">metformina 500</button>
+            <button class="btn btn-ghost" type="button" data-rx="metformina850">metformina 850</button>
+            <button class="btn btn-ghost" type="button" data-rx="glibenclamida">glibenclamida</button>
+            <button class="btn btn-ghost" type="button" data-rx="gliclazida">gliclazida MR</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Antifúngicos</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="fluconazol">fluconazol</button>
+            <button class="btn btn-ghost" type="button" data-rx="cetoconazolCreme">cetoconazol creme</button>
+            <button class="btn btn-ghost" type="button" data-rx="miconazolCreme">miconazol creme</button>
+            <button class="btn btn-ghost" type="button" data-rx="shampooCeto">shampoo ceto</button>
+            <button class="btn btn-ghost" type="button" data-rx="nistatina">nistatina</button>
+          </div>
+
+          <div class="small" style="margin:10px 0 0;">Dermatológicos / Alergia</div>
+          <div class="quickgrid">
+            <button class="btn btn-ghost" type="button" data-rx="hidrocortisona">hidrocortisona</button>
+            <button class="btn btn-ghost" type="button" data-rx="mupirocina">mupirocina</button>
+            <button class="btn btn-ghost" type="button" data-rx="dexclorfeniramina">dexclorfeniramina</button>
+          </div>
+
+          <label style="margin-top:12px;">Prescrição (campo final — é isso que vai pro PDF)</label>
+          <textarea id="r_texto" placeholder="Escreva/edite aqui…">${esc(draft.texto || "")}</textarea>
+
+          <label>Observações (opcional — aparece no PDF se você escrever)</label>
+          <textarea id="r_obs" placeholder="Ex.: orientações, retorno...">${esc(draft.obs || "")}</textarea>
+        `;
+      },
+      build: async () => {
+        const paciente = $("r_paciente")?.value.trim();
+        const cidade = $("r_cidade")?.value.trim();
+        const dataISO = $("r_data")?.value || todayISO();
+        const texto = $("r_texto")?.value.trim();
+        const obs = $("r_obs")?.value.trim();
+
+        // obrigatório: paciente + prescrição
+        const header = [
+          line("Paciente", paciente || "—")
+        ].join("");
+
+        const presc = texto
+          ? `<div class="doc-title">Prescrição</div><div class="doc-block">${esc(texto)}</div>`
+          : `<p class="doc-line">Preencha a prescrição.</p>`;
+
+        const obsBlock = obs ? block("Observações", obs) : "";
+
+        const rodape = `<p class="doc-line"><strong>${esc(cidade || "Cidade")}</strong>, ${esc(brDate(dataISO))}</p>`;
+
+        // salva rascunho (memória forte)
+        await setDraft("draft_receita", {
+          paciente, cidade, data: dataISO, texto, obs
+        });
+
+        return header + presc + obsBlock + rodape;
+      },
+      afterRender: async () => {
+        $("formPanel").querySelectorAll("[data-rx]").forEach(btn=>{
+          btn.addEventListener("click", ()=>appendRx(btn.dataset.rx));
+        });
+      }
+    },
+
+    recibo: {
+      title: "Recibo",
+      sub: "Comprovação de pagamento / prestação de serviço.",
+      renderForm: async () => `
+        <label>Pagador (paciente)</label>
+        <input id="rc_pagador" />
+
+        <div class="row">
+          <div>
+            <label>Valor recebido (R$)</label>
+            <input id="rc_valor" type="number" step="0.01" placeholder="Ex.: 150.00" />
+          </div>
+          <div>
+            <label>Forma de pagamento</label>
+            <input id="rc_forma" placeholder="PIX / dinheiro / cartão" />
+          </div>
+        </div>
+
+        <label>Referente a</label>
+        <input id="rc_ref" placeholder="Ex.: consulta / procedimento..." />
+
+        <label>Observações (opcional)</label>
+        <textarea id="rc_obs"></textarea>
+
+        <div class="row">
+          <div>
+            <label>Cidade</label>
+            <input id="rc_cidade" />
+          </div>
+          <div>
+            <label>Data</label>
+            <input id="rc_data" type="date" value="${esc(todayISO())}" />
+          </div>
+        </div>
+      `,
+      build: async () => {
+        const pag = $("rc_pagador")?.value.trim();
+        const valor = $("rc_valor")?.value.trim();
+        const forma = $("rc_forma")?.value.trim();
+        const ref = $("rc_ref")?.value.trim();
+        const obs = $("rc_obs")?.value.trim();
+        const cidade = $("rc_cidade")?.value.trim();
+        const data = $("rc_data")?.value || todayISO();
+
+        const valorFmt = valor ? Number(valor).toFixed(2) : "0.00";
+
+        return `
+          <div class="doc-title">Recibo</div>
+          <p class="doc-line">Recebi de <strong>${esc(pag || "—")}</strong> a quantia de <strong>R$ ${esc(valorFmt)}</strong>.</p>
+          ${ref ? `<p class="doc-line"><strong>Referente a:</strong> ${esc(ref)}</p>` : ""}
+          ${forma ? `<p class="doc-line"><strong>Forma:</strong> ${esc(forma)}</p>` : ""}
+          ${obs ? block("Observações", obs) : ""}
+          <p class="doc-line"><strong>${esc(cidade || "Cidade")}</strong>, ${esc(brDate(data))}</p>
+        `;
+      }
+    },
+
+    orcamento: {
+      title: "Orçamento",
+      sub: "Procedimentos e valores (até 10 itens).",
+      renderForm: async () => {
+        let rows = "";
+        for (let i=1;i<=10;i++){
+          rows += `
+            <div class="row">
+              <div>
+                <label>Procedimento ${i}</label>
+                <input id="o_d${i}" />
+              </div>
+              <div>
+                <label>Valor ${i} (R$)</label>
+                <input id="o_v${i}" type="number" step="0.01" />
+              </div>
+            </div>
+          `;
+        }
+        return `
+          <label>Paciente</label>
+          <input id="o_paciente" />
+
+          <label>Observações</label>
+          <textarea id="o_obs"></textarea>
+
+          <div class="small" style="margin:10px 0 6px;">Itens:</div>
+          ${rows}
+
+          <div class="row">
+            <div>
+              <label>Cidade</label>
+              <input id="o_cidade" />
+            </div>
+            <div>
+              <label>Data</label>
+              <input id="o_data" type="date" value="${esc(todayISO())}" />
+            </div>
+          </div>
+        `;
+      },
+      build: async () => {
+        const paciente = $("o_paciente")?.value.trim();
+        const cidade = $("o_cidade")?.value.trim();
+        const data = $("o_data")?.value || todayISO();
+
+        const itens = [];
+        for (let i=1;i<=10;i++){
+          const d = ($(`o_d${i}`)?.value || "").trim();
+          const rawV = ($(`o_v${i}`)?.value || "").trim();
+          if (d || rawV){
+            itens.push({ desc: d || "", valor: rawV ? Number(rawV) : 0 });
+          }
+        }
+
+        let table = "";
+        if (itens.length){
+          const total = itens.reduce((a,b)=>a+(b.valor||0),0);
+          table = `
+            <div class="doc-title">Procedimentos</div>
+            <table>
+              <thead><tr><th>Procedimento</th><th>Valor (R$)</th></tr></thead>
+              <tbody>
+                ${itens.map(it => `<tr><td>${esc(it.desc)}</td><td>${(it.valor||0).toFixed(2)}</td></tr>`).join("")}
+              </tbody>
+              <tfoot><tr><td>Total</td><td>${total.toFixed(2)}</td></tr></tfoot>
+            </table>
+          `;
+        } else {
+          table = `<p class="doc-line">Nenhum procedimento informado.</p>`;
+        }
+
+        return `
+          ${line("Paciente", paciente || "—")}
+          ${table}
+          ${($("o_obs")?.value.trim()) ? block("Observações", $("o_obs").value.trim()) : ""}
+          <p class="doc-line"><strong>${esc(cidade || "Cidade")}</strong>, ${esc(brDate(data))}</p>
+        `;
+      }
+    },
+
+    laudo: {
+      title: "Laudo",
+      sub: "Relatório estruturado com conclusão.",
+      renderForm: async () => `
+        <label>Paciente</label>
+        <input id="l_paciente" />
+
+        <label>Título</label>
+        <input id="l_titulo" placeholder="Ex.: Laudo clínico..." />
+
+        <label>Descrição detalhada</label>
+        <textarea id="l_desc"></textarea>
+
+        <label>Conclusão / Impressão diagnóstica</label>
+        <textarea id="l_conc"></textarea>
+
+        <div class="row">
+          <div>
+            <label>Cidade</label>
+            <input id="l_cidade" />
+          </div>
+          <div>
+            <label>Data</label>
+            <input id="l_data" type="date" value="${esc(todayISO())}" />
+          </div>
+        </div>
+      `,
+      build: async () => {
+        const paciente = $("l_paciente")?.value.trim();
+        const cidade = $("l_cidade")?.value.trim();
+        const data = $("l_data")?.value || todayISO();
+        return `
+          ${line("Paciente", paciente || "—")}
+          ${$("l_titulo")?.value.trim() ? line("Título", $("l_titulo").value.trim()) : ""}
+          ${$("l_desc")?.value.trim() ? block("Descrição", $("l_desc").value.trim()) : ""}
+          ${$("l_conc")?.value.trim() ? block("Conclusão", $("l_conc").value.trim()) : ""}
+          <p class="doc-line"><strong>${esc(cidade || "Cidade")}</strong>, ${esc(brDate(data))}</p>
+        `;
+      }
+    },
+
+    atestado: {
+      title: "Atestado",
+      sub: "Justificativa e afastamento (opcional).",
+      renderForm: async () => `
+        <label>Paciente</label>
+        <input id="a_paciente" />
+
+        <label>Dias de afastamento (opcional)</label>
+        <input id="a_dias" type="number" min="0" step="1" placeholder="Ex.: 2" />
+
+        <label>Texto do atestado</label>
+        <textarea id="a_desc" placeholder="Ex.: Atesto para os devidos fins..."></textarea>
+
+        <div class="row">
+          <div>
+            <label>Cidade</label>
+            <input id="a_cidade" />
+          </div>
+          <div>
+            <label>Data</label>
+            <input id="a_data" type="date" value="${esc(todayISO())}" />
+          </div>
+        </div>
+      `,
+      build: async () => {
+        const paciente = $("a_paciente")?.value.trim();
+        const cidade = $("a_cidade")?.value.trim();
+        const data = $("a_data")?.value || todayISO();
+        const diasRaw = $("a_dias")?.value.trim();
+        const dias = diasRaw ? Number(diasRaw) : null;
+
+        return `
+          ${line("Paciente", paciente || "—")}
+          ${(dias && !Number.isNaN(dias) && dias > 0) ? `<p class="doc-line"><strong>Afastamento:</strong> ${dias} dia(s).</p>` : ""}
+          ${$("a_desc")?.value.trim() ? block("Atestado", $("a_desc").value.trim()) : `<p class="doc-line">Preencha o texto do atestado.</p>`}
+          <p class="doc-line"><strong>${esc(cidade || "Cidade")}</strong>, ${esc(brDate(data))}</p>
+        `;
+      }
+    }
+  };
+
+  let currentTab = "agenda";
+
+  async function renderTab(tab){
+    currentTab = tab;
+
+    document.querySelectorAll(".tabbtn").forEach(b=>{
+      b.classList.toggle("active", b.dataset.tab === tab);
+    });
+
+    $("docTitle").textContent = TABS[tab].title;
+    $("docSub").textContent = TABS[tab].sub;
+
+    $("formPanel").innerHTML = await TABS[tab].renderForm();
+
+    // listeners
+    $("formPanel").querySelectorAll("input,textarea,select").forEach(el=>{
+      el.addEventListener("input", buildPreview);
+      el.addEventListener("change", buildPreview);
+    });
+
+    if (typeof TABS[tab].afterRender === "function") await TABS[tab].afterRender();
+
+    await buildPreview();
+  }
+
+  async function buildPreview(){
+    const prof = await BTXDB.getKV(KV_PROF);
+
+    $("profResumo").textContent = profResumo(prof);
+    $("pvMeta").textContent = nowBR();
+
+    $("pvHeader").innerHTML = headerHTML(prof);
+    $("pvTitle").textContent = TABS[currentTab].title;
+    $("pvSub").textContent = TABS[currentTab].sub;
+
+    $("pvBody").innerHTML = await TABS[currentTab].build();
+    $("pvSign").innerHTML = signHTML(prof);
+  }
+
+  /* ===== BOTÕES GERAIS ===== */
+  $("btnSalvarProf").addEventListener("click", async ()=>{
+    const p = readProfFromUI();
+    if (!p.nome){
+      alert("Digite pelo menos o nome do profissional para salvar.");
+      return;
+    }
+    await BTXDB.setKV(KV_PROF, p);
+    toast("Profissional salvo ✅");
+    await buildPreview();
+  });
+
+  $("btnLimparProf").addEventListener("click", async ()=>{
+    await BTXDB.delKV(KV_PROF);
+    setProfToUI(null);
+    toast("Profissional limpo ✅");
+    await buildPreview();
+  });
+
+  $("btnLimparForm").addEventListener("click", async ()=>{
+    $("formPanel").querySelectorAll("input,textarea,select").forEach(el=> el.value = "");
+    toast("Formulário limpo ✅");
+    await buildPreview();
+  });
+
+  $("btnPrint").addEventListener("click", async ()=>{
+    await buildPreview();
+    window.print();
+  });
+
+  $("btnResetAll").addEventListener("click", async ()=>{
+    if(!confirm("Tem certeza? Isso apaga TUDO (profissional, agenda, pacientes, prontuário e rascunhos).")) return;
+    await BTXDB.resetAll();
+    setProfToUI(null);
+    toast("Tudo zerado ✅");
+    await renderTab("agenda");
+  });
+
+  // Export/Import
+  $("btnExport").addEventListener("click", async ()=>{
+    const data = await BTXDB.exportAll();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `BTX_Docs_Backup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast("Backup exportado ✅");
+  });
+
+  $("btnImport").addEventListener("click", ()=> $("fileImport").click());
+
+  $("fileImport").addEventListener("change", async (e)=>{
+    const file = e.target.files?.[0];
+    if(!file) return;
+    try{
+      const text = await file.text();
+      const data = JSON.parse(text);
+      await BTXDB.importAll(data);
+      // recarrega prof na UI
+      setProfToUI(await BTXDB.getKV(KV_PROF));
+      toast("Backup importado ✅");
+      await renderTab(currentTab);
+    }catch(err){
+      alert("Falha ao importar backup: " + (err?.message || err));
+    }finally{
+      e.target.value = "";
+    }
+  });
+
+  // Atualizar (força update SW + reload)
+  $("btnUpdate").addEventListener("click", async ()=>{
+    try{
+      if(navigator.serviceWorker?.getRegistration){
+        const reg = await navigator.serviceWorker.getRegistration();
+        await reg?.update();
+      }
+      toast("Atualizando offline…");
+      setTimeout(()=>location.reload(), 600);
+    }catch{
+      location.reload();
+    }
+  });
+
+  /* init tabs */
+  document.querySelectorAll(".tabbtn").forEach(btn=>{
+    btn.addEventListener("click", ()=>renderTab(btn.dataset.tab));
+  });
+
+  // init
+  (async () => {
+    setProfToUI(await BTXDB.getKV(KV_PROF));
+    await renderTab("agenda");
+    toast("BTX Docs carregado ✅");
+  })();
+})();
