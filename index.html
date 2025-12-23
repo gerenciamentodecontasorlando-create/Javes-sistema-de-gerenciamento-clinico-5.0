@@ -11,54 +11,25 @@
   <link rel="icon" href="./icons/icon-192.png">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
 
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=1.0.0">
 </head>
 
 <body>
-  <!-- LOGIN OVERLAY -->
-  <div id="loginOverlay" class="overlay">
-    <div class="loginCard">
-      <div class="loginBrand">
-        <div class="loginLogo">B</div>
-        <div>
-          <div class="loginTitle">BTX Docs Saúde</div>
-          <div class="loginSub">Acesso rápido • offline real • memória forte</div>
-        </div>
-      </div>
-
-      <div class="loginHint">
-        Digite a chave de acesso do cliente.<br>
-        <b>Padrão:</b> <code>btx007</code>
-      </div>
-
-      <label for="loginKey">Chave</label>
-      <input id="loginKey" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="ex.: btx007">
-
-      <div class="row" style="margin-top:12px;">
-        <button id="btnLogin" class="btn btn-primary" type="button">Entrar</button>
-        <button id="btnResetLock" class="btn btn-ghost" type="button">Esqueci / Trocar chave</button>
-      </div>
-
-      <div class="small muted" style="margin-top:10px;">
-        *A chave é local (neste aparelho). Se quiser mudar depois, vá em Configurações.
-      </div>
-    </div>
-  </div>
-
   <!-- TOPBAR -->
   <header class="topbar no-print">
     <div class="brand">
-      <div class="logo">B</div>
-      <div>
+      <div class="logo" aria-label="BTX">B</div>
+      <div class="brandtxt">
         <h1>BTX Docs Saúde</h1>
-        <p>Agenda • Prontuário • Ficha • Receituário • Recibo • Orçamento • Laudo • Atestado</p>
+        <p>Agenda • Prontuário • Ficha • Receituário • Recibo • Orçamento • Laudo • Atestado — offline real</p>
       </div>
     </div>
 
-    <div class="topActions">
-      <div class="pill" id="netPill">—</div>
-      <div class="pill" id="pwaPill">PWA: verificando…</div>
-      <button class="btn btn-ghost" id="btnForceUpdate" type="button">Atualizar</button>
+    <div class="top-actions">
+      <span class="pill" id="netPill">—</span>
+      <span class="pill" id="pwaPill">PWA: …</span>
+      <button class="btn btn-ghost" id="btnInstall" type="button" style="display:none;">Instalar</button>
+      <button class="btn btn-ghost" id="btnHardRefresh" type="button" title="Força atualizar PWA">Atualizar</button>
     </div>
   </header>
 
@@ -71,8 +42,8 @@
           <aside class="card no-print">
             <h2>Profissional</h2>
             <p class="small">
-              Estes dados entram automaticamente no cabeçalho/rodapé de todos os documentos e no prontuário.
-              Salva no aparelho (<b>IndexedDB</b>).
+              Esses dados entram automaticamente no cabeçalho/rodapé de todos os documentos.
+              Ficam salvos no aparelho (memória forte).
             </p>
 
             <label for="profNome">Nome completo</label>
@@ -107,40 +78,43 @@
             </div>
 
             <div class="actions" style="justify-content:flex-start; margin-top:12px;">
-              <button class="btn btn-ghost" type="button" id="btnLimparProf">Limpar</button>
-              <button class="btn btn-primary" type="button" id="btnSalvarProf">Salvar</button>
+              <button class="btn btn-ghost" type="button" id="btnProfLimpar">Limpar</button>
+              <button class="btn btn-primary" type="button" id="btnProfSalvar">Salvar</button>
             </div>
 
-            <hr class="sep" />
+            <hr class="hr" />
 
             <h2>Menu</h2>
             <div class="tabs">
               <button class="tabbtn active" data-tab="agenda">Agenda <span class="badge">dia/semana</span></button>
-              <button class="tabbtn" data-tab="prontuario">Prontuário <span class="badge">paciente</span></button>
-              <button class="tabbtn" data-tab="ficha">Ficha clínica <span class="badge">doc</span></button>
+              <button class="tabbtn" data-tab="prontuario">Prontuário <span class="badge">por paciente</span></button>
+              <button class="tabbtn" data-tab="ficha">Ficha clínica <span class="badge">paciente</span></button>
               <button class="tabbtn" data-tab="receita">Receituário <span class="badge">1 clique</span></button>
-              <button class="tabbtn" data-tab="recibo">Recibo <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="orcamento">Orçamento <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="laudo">Laudo <span class="badge">doc</span></button>
-              <button class="tabbtn" data-tab="atestado">Atestado <span class="badge">doc</span></button>
+              <button class="tabbtn" data-tab="recibo">Recibo <span class="badge">pagamento</span></button>
+              <button class="tabbtn" data-tab="orcamento">Orçamento <span class="badge">itens</span></button>
+              <button class="tabbtn" data-tab="laudo">Laudo <span class="badge">relatório</span></button>
+              <button class="tabbtn" data-tab="atestado">Atestado <span class="badge">afastamento</span></button>
             </div>
 
-            <hr class="sep" />
+            <hr class="hr" />
 
-            <h2>Configurações</h2>
+            <h2>Backup</h2>
+            <p class="small">
+              Use isso pra não perder nada e também pra migrar entre aparelhos.
+            </p>
+
             <div class="row">
-              <button class="btn btn-ghost" id="btnExportAll" type="button">Exportar dados</button>
-              <button class="btn btn-danger" id="btnResetAll" type="button">Zerar tudo</button>
+              <button class="btn btn-ghost" id="btnExportJSON" type="button">Exportar (JSON)</button>
+              <label class="btn btn-ghost filebtn" for="importFile">Importar (JSON)</label>
+              <input id="importFile" type="file" accept="application/json" style="display:none;">
             </div>
 
             <div class="row" style="margin-top:10px;">
-              <button class="btn btn-ghost" id="btnInstall" type="button" style="display:none;">Instalar App</button>
-              <button class="btn btn-ghost" id="btnChangeKey" type="button">Trocar chave</button>
+              <button class="btn btn-danger" id="btnResetAll" type="button">Zerar tudo</button>
             </div>
 
-            <p class="small" style="margin-top:12px;">
-              PDF: use “Imprimir / PDF”.<br>
-              Baixar: exporta o documento atual em HTML.
+            <p class="small" style="margin-top:10px;">
+              Dica: se algo “não atualiza”, aperta <b>Atualizar</b> lá em cima.
             </p>
           </aside>
 
@@ -149,7 +123,7 @@
             <div class="content-header">
               <div>
                 <h3 id="docTitle">Agenda</h3>
-                <div class="sub" id="docSub">Dia e semana, offline com memória forte.</div>
+                <div class="sub" id="docSub">Dia e Semana, offline, com memória forte.</div>
               </div>
               <div class="small">
                 Profissional: <span id="profResumo">—</span>
@@ -163,39 +137,33 @@
               <!-- PREVIEW -->
               <div class="panel">
                 <div class="actions no-print">
-                  <button class="btn btn-ghost" type="button" id="btnLimparForm">Limpar</button>
-                  <button class="btn btn-ghost" type="button" id="btnDownload">Baixar (HTML)</button>
+                  <button class="btn btn-ghost" type="button" id="btnClearForm">Limpar</button>
+                  <button class="btn btn-ghost" type="button" id="btnDownloadHTML">Baixar (HTML)</button>
                   <button class="btn btn-primary" type="button" id="btnPrint">Imprimir / PDF</button>
                 </div>
 
                 <div class="paper" id="paper">
                   <div class="doc-header">
                     <div class="doc-left">
-                      <div class="doc-titleRow">
-                        <div class="docMark">B</div>
+                      <div class="doc-brand">
+                        <div class="doc-logo">B</div>
                         <div>
-                          <div class="docBrand">BTX Docs Saúde</div>
-                          <div class="docBrandSub">DOCUMENTOS CLÍNICOS</div>
+                          <div class="doc-brand-title">BTX Docs Saúde</div>
+                          <div class="doc-brand-sub" id="docBrandSub">DOCUMENTOS CLÍNICOS • —</div>
                         </div>
                       </div>
-
-                      <div class="docMainTitle" id="pvTitle">Pré-visualização</div>
-                      <div class="docMainSub" id="pvSub">Preencha um formulário para gerar o documento.</div>
-
-                      <div class="docProf" id="pvProfBlock"></div>
                     </div>
+                    <div class="doc-meta" id="pvMeta"></div>
+                  </div>
 
-                    <div class="doc-right">
-                      <div class="docRightLine" id="pvAddr"></div>
-                      <div class="docRightLine strong" id="pvDateTime"></div>
-                    </div>
+                  <div class="doc-blockline">
+                    <div class="doc-h-title" id="pvTitle">Agenda</div>
+                    <div class="doc-h-sub" id="pvSub">Dia e Semana, offline, com memória forte.</div>
                   </div>
 
                   <div id="pvBody"></div>
 
                   <div class="doc-footer" id="pvFooter"></div>
-
-                  <div class="sign" id="pvSign"></div>
                 </div>
               </div>
             </div>
@@ -208,8 +176,41 @@
 
   <div class="toast" id="toast"></div>
 
-  <script src="./db.js"></script>
-  <script src="./app.js"></script>
-  <script src="./pwa.js"></script>
+  <!-- LOGIN MODAL -->
+  <div class="modal" id="loginModal" style="display:none;">
+    <div class="modalbox">
+      <div class="modalhead">
+        <div class="modalbrand">
+          <div class="doc-logo">B</div>
+          <div>
+            <div class="modaltitle">BTX Docs Saúde</div>
+            <div class="modalsub">Acesso rápido • offline real • memória forte</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modalbody">
+        <div class="small" style="margin-bottom:8px;">
+          Digite a chave de acesso do cliente. Padrão: <b>btx007</b>
+        </div>
+
+        <label for="loginKey">Chave</label>
+        <input id="loginKey" placeholder="btx007" autocomplete="off" autocapitalize="none" />
+
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn btn-primary" id="btnLogin" type="button">Entrar</button>
+          <button class="btn btn-ghost" id="btnForgotKey" type="button">Esqueci / Trocar chave</button>
+        </div>
+
+        <div class="small" style="margin-top:10px;">
+          *A chave é local (neste aparelho). Se quiser mudar depois, vá em Configurações.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./db.js?v=1.0.0"></script>
+  <script src="./app.js?v=1.0.0"></script>
+  <script src="./pwa.js?v=1.0.0"></script>
 </body>
 </html>
